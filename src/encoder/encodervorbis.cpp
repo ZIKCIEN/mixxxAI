@@ -6,6 +6,7 @@
 #include <vorbis/vorbisenc.h>
 
 #include <QtDebug>
+#include <limits>
 
 #include "audio/types.h"
 #include "encoder/encodercallback.h"
@@ -65,6 +66,9 @@ void EncoderVorbis::setEncoderSettings(const EncoderSettings& settings)
 
 // call sendPackages() or write() after 'flush()' as outlined in enginebroadcast.cpp
 void EncoderVorbis::flush() {
+    if (!m_bStreamInitialized) {
+        return;
+    }
     vorbis_analysis_wrote(&m_vdsp, 0);
     writePage();
 }
@@ -138,7 +142,17 @@ void EncoderVorbis::writePage() {
 }
 
 void EncoderVorbis::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    float** buffer = vorbis_analysis_buffer(&m_vdsp, static_cast<int>(bufferSize));
+    if (!m_bStreamInitialized || !m_pCallback || bufferSize == 0 || !samples ||
+            bufferSize > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+            bufferSize % 2 != 0) {
+        qWarning() << "EncoderVorbis: invalid sample buffer" << bufferSize;
+        return;
+    }
+    float** buffer = vorbis_analysis_buffer(&m_vdsp, static_cast<int>(bufferSize / 2));
+    if (!buffer || !buffer[0] || (m_channels == 2 && !buffer[1])) {
+        qWarning() << "EncoderVorbis: failed to allocate analysis buffer";
+        return;
+    }
 
     // Deinterleave samples. We use normalized floats in the engine [-1.0, 1.0]
     // and libvorbis expects samples in the range [-1.0, 1.0] so no conversion
@@ -216,6 +230,13 @@ void EncoderVorbis::initStream() {
 
 int EncoderVorbis::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
+    if (!m_pCallback || (m_channels != 1 && m_channels != 2) || m_bitrate <= 0 ||
+            m_bitrate > std::numeric_limits<int>::max() / 1000 ||
+            !sampleRate.isValid()) {
+        qWarning() << "EncoderVorbis: invalid encoder settings";
+        return -1;
+    }
+
     vorbis_info_init(&m_vinfo);
 
     // initialize VBR quality based mode

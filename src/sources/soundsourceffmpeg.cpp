@@ -571,6 +571,10 @@ SoundSourceFFmpeg::~SoundSourceFFmpeg() {
 SoundSource::OpenResult SoundSourceFFmpeg::tryOpen(
         OpenMode /*mode*/,
         const OpenParams& params) {
+    if (!m_pavPacket) {
+        kLogger.warning() << "Failed to allocate FFmpeg packet";
+        return OpenResult::Failed;
+    }
     // Open input
     {
         AVFormatContext* pavInputFormatContext =
@@ -825,6 +829,10 @@ SoundSource::OpenResult SoundSourceFFmpeg::tryOpen(
 
     DEBUG_ASSERT(!m_pavDecodedFrame);
     m_pavDecodedFrame = av_frame_alloc();
+    if (!m_pavDecodedFrame) {
+        kLogger.warning() << "Failed to allocate FFmpeg decoded frame";
+        return OpenResult::Failed;
+    }
 
     // FFmpeg does not provide sample-accurate decoding after random seeks
     // in the stream out of the box. Depending on the actual codec we need
@@ -956,6 +964,10 @@ bool SoundSourceFFmpeg::initResampling(
         }
         DEBUG_ASSERT(!m_pavResampledFrame);
         m_pavResampledFrame = av_frame_alloc();
+        if (!m_pavResampledFrame) {
+            kLogger.warning() << "Failed to allocate FFmpeg resampled frame";
+            return false;
+        }
     }
     // Finish initialization
 #if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100) // FFmpeg 5.1

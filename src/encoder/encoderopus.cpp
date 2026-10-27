@@ -146,6 +146,12 @@ int EncoderOpus::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
     Q_UNUSED(pUserErrorMessage);
 
+    if (!m_pCallback || (m_channels != 1 && m_channels != 2) || m_bitrate <= 0 ||
+            m_bitrate > std::numeric_limits<int>::max() / 1000) {
+        kLogger.warning() << "initEncoder failed: invalid Opus encoder settings";
+        return -1;
+    }
+
     if (sampleRate != kMainSampleRate) {
             kLogger.warning() << "initEncoder failed: samplerate not supported by Opus";
 
@@ -167,7 +173,7 @@ int EncoderOpus::initEncoder(mixxx::audio::SampleRate sampleRate,
     int createResult = 0;
     m_pOpus = opus_encoder_create(m_sampleRate, m_channels, OPUS_APPLICATION_AUDIO, &createResult);
 
-    if (createResult != OPUS_OK) {
+    if (createResult != OPUS_OK || !m_pOpus) {
         kLogger.warning() << "opus_encoder_create failed:" << opusErrorString(createResult);
         return -1;
     }
@@ -377,7 +383,7 @@ void EncoderOpus::pushTagsPacket() {
 }
 
 void EncoderOpus::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    if (!m_pOpus) {
+    if (!m_pOpus || m_channels <= 0 || (bufferSize > 0 && !samples)) {
         return;
     }
 
@@ -396,6 +402,7 @@ void EncoderOpus::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferS
     }
 
     int writeCount = math_min(writeRequired, writeAvailable);
+    writeCount -= writeCount % m_channels;
     if (writeCount > 0) {
         const int written = m_fifoBuffer.write(samples, writeCount);
         m_totalSamples += written / m_channels;
@@ -438,7 +445,7 @@ void EncoderOpus::encodeChunk(bool endOfStream) {
 }
 
 void EncoderOpus::writePage(ogg_packet* pPacket) {
-    if (!pPacket) {
+    if (!m_pCallback || !pPacket) {
         return;
     }
 

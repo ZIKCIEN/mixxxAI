@@ -7,6 +7,7 @@
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
+#include <algorithm>
 #include <limits>
 
 #include "encoder/encodercallback.h"
@@ -36,7 +37,8 @@ EncoderFdkAac::EncoderFdkAac(EncoderCallback* pCallback)
           m_readRequired(0),
           m_aacEnc(),
           m_aacInfo(),
-          m_hasSbr(false) {
+          m_hasSbr(false),
+          m_flushed(false) {
     // Load the shared library
     //
     // Libraries from external sources take priority because they may include HE-AAC support,
@@ -253,9 +255,11 @@ void EncoderFdkAac::setEncoderSettings(const EncoderSettings& settings) {
 
 int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
+    m_flushed = false;
     m_sampleRate = sampleRate;
 
-    if (!sampleRate.isValid() || (m_channels != 1 && m_channels != 2) || m_bitrate <= 0 ||
+    if (!m_pCallback || !sampleRate.isValid() ||
+            (m_channels != 1 && m_channels != 2) || m_bitrate <= 0 ||
             m_bitrate > std::numeric_limits<int>::max() / 1000) {
         kLogger.warning() << "initEncoder failed: invalid AAC encoder settings";
         return -1;
@@ -375,7 +379,7 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
 }
 
 void EncoderFdkAac::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    if (!m_pInputFifo || m_channels <= 0 || (bufferSize > 0 && !samples) ||
+    if (m_flushed || !m_pInputFifo || m_channels <= 0 || (bufferSize > 0 && !samples) ||
             bufferSize > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
             bufferSize % static_cast<std::size_t>(m_channels) != 0) {
         return;
@@ -412,18 +416,18 @@ void EncoderFdkAac::encodeBuffer(const CSAMPLE* samples, const std::size_t buffe
     processFIFO();
 }
 
-void EncoderFdkAac::processFIFO() {
-    if (!m_pInputFifo || m_pFifoChunkBuffer.empty()) {
+void EncoderFdkAac::processFIFO(bool flush) {
+    if (!m_aacEnc || !m_pInputFifo || m_pFifoChunkBuffer.empty()) {
         return;
     }
 
-    while (m_pInputFifo->readAvailable() >= m_readRequired) {
-        m_pInputFifo->read(m_pFifoChunkBuffer.data(), m_readRequired);
-
+    const auto encodeSamples = [this](
+                                       int dataSampleCount,
+                                       int inputSampleCount) -> AACENC_ERROR {
         // fdk-aac only accept pointers for most buffer settings.
         // Declare settings here and point to them below.
         int inSampleSize = sizeof(SAMPLE);
-        int inDataSize = m_readRequired * inSampleSize;
+        int inDataSize = dataSampleCount * inSampleSize;
         int inDataDescription = IN_AUDIO_DATA;
 
         int outElemSize = sizeof(unsigned char);
@@ -440,7 +444,7 @@ void EncoderFdkAac::processFIFO() {
         inputBuf.bufferIdentifiers = &inDataDescription;
 
         AACENC_InArgs inputDesc;
-        inputDesc.numInSamples = m_readRequired;
+        inputDesc.numInSamples = inputSampleCount;
         inputDesc.numAncBytes = 0;
 
         // Output (result) Buffer
@@ -455,25 +459,60 @@ void EncoderFdkAac::processFIFO() {
         // Populated by aacEncEncode
         AACENC_OutArgs outputDesc;
 
-        int result = aacEncEncode(m_aacEnc, &inputBuf, &outputBuf, &inputDesc, &outputDesc);
+        const AACENC_ERROR result =
+                aacEncEncode(m_aacEnc, &inputBuf, &outputBuf, &inputDesc, &outputDesc);
+        if (result == AACENC_ENCODE_EOF) {
+            return result;
+        }
         if (result != AACENC_OK) {
             kLogger.warning() << "aacEncEncode failed! error code:" << result;
-            return;
+            return result;
         }
 
         if (outputDesc.numOutBytes < 0 ||
                 outputDesc.numOutBytes > static_cast<int>(m_pAacDataBuffer.size())) {
             kLogger.warning() << "aacEncEncode returned an invalid output size:"
                               << outputDesc.numOutBytes;
+            return AACENC_ENCODE_ERROR;
+        }
+
+        if (inputSampleCount >= 0) {
+            const int sampleDiff = inputDesc.numInSamples - outputDesc.numInSamples;
+            if (sampleDiff > 0) {
+                kLogger.warning() << "encoder ignored" << sampleDiff << "samples!";
+            }
+        }
+
+        if (outputDesc.numOutBytes > 0) {
+            m_pCallback->write(nullptr, m_pAacDataBuffer.data(), 0, outputDesc.numOutBytes);
+        }
+        return AACENC_OK;
+    };
+
+    while (m_pInputFifo->readAvailable() >= m_readRequired ||
+            (flush && m_pInputFifo->readAvailable() > 0)) {
+        const int inputSampleCount = std::min(
+                m_pInputFifo->readAvailable(), m_readRequired);
+        if (m_pInputFifo->read(m_pFifoChunkBuffer.data(), inputSampleCount) !=
+                inputSampleCount) {
+            kLogger.warning() << "Failed to read AAC input samples from FIFO";
             return;
         }
-
-        int sampleDiff = inputDesc.numInSamples - outputDesc.numInSamples;
-        if (sampleDiff > 0) {
-            kLogger.warning() << "encoder ignored" << sampleDiff << "samples!";
+        if (encodeSamples(inputSampleCount, inputSampleCount) != AACENC_OK) {
+            return;
         }
+    }
 
-        m_pCallback->write(nullptr, m_pAacDataBuffer.data(), 0, outputDesc.numOutBytes);
+    if (flush) {
+        for (;;) {
+            const AACENC_ERROR result = encodeSamples(0, -1);
+            if (result == AACENC_ENCODE_EOF) {
+                break;
+            }
+            if (result != AACENC_OK) {
+                return;
+            }
+        }
     }
 }
 
@@ -484,6 +523,9 @@ void EncoderFdkAac::updateMetaData(const QString&,
 }
 
 void EncoderFdkAac::flush() {
-    // At this point there may still be samples in the FIFO buffer.
-    processFIFO();
+    if (m_flushed) {
+        return;
+    }
+    processFIFO(true);
+    m_flushed = true;
 }

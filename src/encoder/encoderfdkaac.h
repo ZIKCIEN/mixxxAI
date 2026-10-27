@@ -201,7 +201,7 @@ class EncoderFdkAac : public Encoder {
     aacEncoder_SetParam_ aacEncoder_SetParam;
 
     // Instance methods
-    void processFIFO();
+    void processFIFO(bool flush = false);
 
     // Instance attributes
     int m_aacAot;
@@ -217,4 +217,5 @@ class EncoderFdkAac : public Encoder {
     std::vector<unsigned char> m_pAacDataBuffer;
     AACENC_InfoStruct m_aacInfo;
     bool m_hasSbr;
+    bool m_flushed;
 };

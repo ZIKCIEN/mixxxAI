@@ -126,7 +126,7 @@ int EncoderMp3::bufferInGrow(std::size_t bufferSize) {
 // Using this method requires to call method 'write()' or 'sendPackages()'
 // depending on which context you use the class (broadcast or recording to HDD)
 void EncoderMp3::flush() {
-    if (m_lameFlags == nullptr || m_flushed) {
+    if (m_lameFlags == nullptr || !m_pCallback || m_flushed) {
         return;
     }
     // Flush also writes ID3 tags.
@@ -259,6 +259,10 @@ int EncoderMp3::initStream() {
 
 int EncoderMp3::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
+    if (!m_pCallback || !sampleRate.isValid()) {
+        qWarning() << "EncoderMp3: invalid encoder settings";
+        return -1;
+    }
     unsigned long samplerate_in = sampleRate;
     // samplerate_out 0 means "let LAME pick the appropriate one"
     unsigned long samplerate_out = (samplerate_in > 48000 ? 48000 : 0);
