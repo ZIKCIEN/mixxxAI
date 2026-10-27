@@ -194,7 +194,8 @@ TrackRecord::SourceSyncStatus TrackRecord::checkSourceSyncStatus(
 
 bool TrackRecord::replaceMetadataFromSource(
         TrackMetadata&& importedMetadata,
-        const QDateTime& sourceSynchronizedAt) {
+        const QDateTime& sourceSynchronizedAt,
+        bool synchronizeSource) {
     VERIFY_OR_DEBUG_ASSERT(sourceSynchronizedAt.isValid()) {
         return false;
     }
@@ -209,7 +210,8 @@ bool TrackRecord::replaceMetadataFromSource(
         setMetadata(std::move(importedMetadata));
         modified = true;
     }
-    if (updateSourceSynchronizedAt(sourceSynchronizedAt)) {
+    if (synchronizeSource &&
+            updateSourceSynchronizedAt(sourceSynchronizedAt)) {
         modified = true;
     }
     return modified;

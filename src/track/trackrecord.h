@@ -124,7 +124,8 @@ class TrackRecord final {
             const FileInfo& fileInfo) const;
     bool replaceMetadataFromSource(
             TrackMetadata&& importedMetadata,
-            const QDateTime& sourceSynchronizedAt);
+            const QDateTime& sourceSynchronizedAt,
+            bool synchronizeSource = true);
 
     // Merge the current metadata with new and additional properties
     // imported from the file. Since these properties are not (yet)

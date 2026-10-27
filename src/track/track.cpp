@@ -188,9 +188,23 @@ void Track::replaceMetadataFromSource(
 
         const auto oldReplayGain =
                 m_record.getMetadata().getTrackInfo().getReplayGain();
+        const auto importedSampleRate =
+                importedMetadata.getStreamInfo().getSignalInfo().getSampleRate();
+        const auto sourceSampleRate = m_record.getStreamInfoFromSource()
+                                              ? m_record.getStreamInfoFromSource()
+                                                        ->getSignalInfo()
+                                                        .getSampleRate()
+                                              : mixxx::audio::SampleRate{};
+        // AI-generated: Keep source metadata unsynchronized when an imported
+        // BPM cannot yet be applied, so a later import can retry it after
+        // stream information becomes available. End AI-generated comment.
+        const bool deferSourceSynchronization = importedBpm.isValid() &&
+                !getSampleRate().isValid() && !importedSampleRate.isValid() &&
+                !sourceSampleRate.isValid();
         bool modified = m_record.replaceMetadataFromSource(
                 std::move(importedMetadata),
-                sourceSynchronizedAt);
+                sourceSynchronizedAt,
+                !deferSourceSynchronization);
         const auto newReplayGain =
                 m_record.getMetadata().getTrackInfo().getReplayGain();
 
