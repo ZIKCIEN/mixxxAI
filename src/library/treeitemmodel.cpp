@@ -1,5 +1,7 @@
 #include "library/treeitemmodel.h"
 
+#include <limits>
+
 #include "library/treeitem.h"
 #include "moc_treeitemmodel.cpp"
 
@@ -180,6 +182,11 @@ void TreeItemModel::insertTreeItemRows(
         qWarning() << "TreeItemModel::insertTreeItemRows: parent item invalid, abort.";
         return;
     }
+    if (position < 0 || position > pParentItem->childRows() ||
+            rows.size() > static_cast<std::size_t>(std::numeric_limits<int>::max() - position)) {
+        qWarning() << "TreeItemModel::insertTreeItemRows: invalid row range, abort.";
+        return;
+    }
 
     beginInsertRows(parent, position, position + static_cast<int>(rows.size()) - 1);
     pParentItem->insertChildren(position, std::move(rows));
@@ -187,10 +194,17 @@ void TreeItemModel::insertTreeItemRows(
 }
 
 bool TreeItemModel::removeRows(int position, int rows, const QModelIndex &parent) {
+    if (rows < 0 || position < 0) {
+        return false;
+    }
     if (rows == 0) {
         return true;
     }
     TreeItem *parentItem = getItem(parent);
+    if (!parentItem || position > parentItem->childRows() ||
+            rows > parentItem->childRows() - position) {
+        return false;
+    }
 
     beginRemoveRows(parent, position, position + rows - 1);
     parentItem->removeChildren(position, rows);

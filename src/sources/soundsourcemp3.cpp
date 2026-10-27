@@ -450,7 +450,7 @@ SoundSource::OpenResult SoundSourceMp3::tryOpen(
         return OpenResult::Failed;
     }
     initChannelCountOnce(maxChannelCount);
-    if (mostCommonSampleRateIndex > kSampleRateCount) {
+    if (mostCommonSampleRateIndex >= kSampleRateCount) {
         kLogger.warning()
                 << "Unknown sample rate in MP3 file:"
                 << m_file.fileName();

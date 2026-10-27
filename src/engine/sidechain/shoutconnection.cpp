@@ -83,6 +83,7 @@ ShoutConnection::ShoutConnection(BroadcastProfilePtr profile,
     if (!(m_pShout = shout_new())) {
         errorDialog(tr("Mixxx encountered a problem"),
                 tr("Could not allocate shout_t"));
+        return;
     }
 
     if (!(m_pShoutMetaData = shout_metadata_new())) {
@@ -164,6 +165,10 @@ QByteArray ShoutConnection::encodeString(const QString& string) {
 }
 
 void ShoutConnection::insertMetaData(const char *pName, const char *pValue) {
+    if (!m_pShoutMetaData) {
+        kLogger.warning() << "Cannot set metadata without a shout metadata handle";
+        return;
+    }
     int ret = shout_metadata_add(m_pShoutMetaData, pName, pValue);
     if (ret != SHOUTERR_SUCCESS) {
         kLogger.warning() << "shout_metadata_add" << pName << "fails with error code" << ret;
@@ -505,6 +510,11 @@ bool ShoutConnection::serverConnect() {
     if (!m_pProfile->getEnabled()) {
         return false;
     }
+    if (!m_pShout) {
+        setStatus(BroadcastProfile::STATUS_FAILURE);
+        setState(NETWORKSTREAMWORKER_STATE_ERROR);
+        return false;
+    }
 
     start(QThread::HighPriority);
     setState(NETWORKSTREAMWORKER_STATE_CONNECTING);
@@ -675,7 +685,13 @@ bool ShoutConnection::processDisconnect() {
 void ShoutConnection::write(const unsigned char* header, const unsigned char* body,
                             int headerLen, int bodyLen) {
     setFunctionCode(7);
-	if (!m_pShout || m_iShoutStatus != SHOUTERR_CONNECTED) {
+    if (headerLen < 0 || bodyLen < 0 ||
+            (headerLen > 0 && !header) || (bodyLen > 0 && !body)) {
+        kLogger.warning() << "ShoutConnection: invalid encoded data block sizes"
+                          << headerLen << bodyLen;
+        return;
+    }
+    if (!m_pShout || m_iShoutStatus != SHOUTERR_CONNECTED) {
         // This happens when the decoder calls flush() and the connection is
         // already down
         return;

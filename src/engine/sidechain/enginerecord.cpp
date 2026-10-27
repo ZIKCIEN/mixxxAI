@@ -1,6 +1,7 @@
 #include "engine/sidechain/enginerecord.h"
 
 #include <chrono>
+#include <limits>
 
 #include "control/controlproxy.h"
 #include "encoder/encoder.h"
@@ -315,6 +316,13 @@ void EngineRecord::writeCueLine() {
 // Encoder calls this method to write compressed audio
 void EngineRecord::write(const unsigned char *header, const unsigned char *body,
                          int headerLen, int bodyLen) {
+    if (headerLen < 0 || bodyLen < 0 ||
+            (headerLen > 0 && !header) || (bodyLen > 0 && !body) ||
+            headerLen > std::numeric_limits<int>::max() - bodyLen) {
+        qWarning() << "EngineRecord: invalid encoded data block sizes"
+                   << headerLen << bodyLen;
+        return;
+    }
     if (!fileOpen()) {
         return;
     }
@@ -322,8 +330,9 @@ void EngineRecord::write(const unsigned char *header, const unsigned char *body,
     if (headerLen > 0) {
         m_dataStream.writeRawData((const char*) header, headerLen);
     }
-    // Always write body
-    m_dataStream.writeRawData((const char*) body, bodyLen);
+    if (bodyLen > 0) {
+        m_dataStream.writeRawData((const char*) body, bodyLen);
+    }
     emit bytesRecorded((headerLen+bodyLen));
 
 }

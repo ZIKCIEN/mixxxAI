@@ -2,6 +2,9 @@
 
 #include <wavpack.h>
 
+#include <cstdint>
+#include <limits>
+
 #include "util/logger.h"
 
 namespace mixxx {
@@ -70,14 +73,36 @@ SoundSource::OpenResult SoundSourceWV::tryOpen(
     // http://www.wavpack.com/lib_use.txt
     QString wavPackFileName = getLocalFileName();
     m_pWVFile = new QFile(wavPackFileName);
-    [[maybe_unused]] auto result = m_pWVFile->open(QFile::ReadOnly);
-    DEBUG_ASSERT(result);
+    if (!m_pWVFile->open(QFile::ReadOnly)) {
+        kLogger.warning() << "failed to open file:" << wavPackFileName
+                          << m_pWVFile->errorString();
+        return OpenResult::Failed;
+    }
+    if (m_pWVFile->size() < 0 ||
+            static_cast<quint64>(m_pWVFile->size()) >
+                    std::numeric_limits<std::uint32_t>::max()) {
+        kLogger.warning()
+                << "WavPack input has an invalid or unsupported 32-bit stream size:"
+                << wavPackFileName;
+        return OpenResult::Aborted;
+    }
     QString correctionFileName(wavPackFileName + "c");
     if (QFile::exists(correctionFileName)) {
         // If there is a correction file, open it as well
         m_pWVCFile = new QFile(correctionFileName);
-        [[maybe_unused]] auto result = m_pWVCFile->open(QFile::ReadOnly);
-        DEBUG_ASSERT(result);
+        if (!m_pWVCFile->open(QFile::ReadOnly)) {
+            kLogger.warning() << "failed to open correction file:" << correctionFileName
+                              << m_pWVCFile->errorString();
+            return OpenResult::Failed;
+        }
+        if (m_pWVCFile->size() < 0 ||
+                static_cast<quint64>(m_pWVCFile->size()) >
+                        std::numeric_limits<std::uint32_t>::max()) {
+            kLogger.warning()
+                    << "WavPack correction file has an invalid or unsupported 32-bit stream size:"
+                    << correctionFileName;
+            return OpenResult::Aborted;
+        }
     }
     m_wpc = WavpackOpenFileInputEx(&s_streamReader, m_pWVFile, m_pWVCFile, msg, openFlags, 0);
     if (!m_wpc) {
@@ -85,12 +110,15 @@ SoundSource::OpenResult SoundSourceWV::tryOpen(
         return OpenResult::Failed;
     }
 
-    initChannelCountOnce(WavpackGetReducedChannels(static_cast<WavpackContext*>(m_wpc)));
-    initSampleRateOnce(WavpackGetSampleRate(static_cast<WavpackContext*>(m_wpc)));
-    initFrameIndexRangeOnce(
-            mixxx::IndexRange::forward(
-                    0,
-                    WavpackGetNumSamples(static_cast<WavpackContext*>(m_wpc))));
+    const auto channelCount = WavpackGetReducedChannels(static_cast<WavpackContext*>(m_wpc));
+    const auto sampleRate = WavpackGetSampleRate(static_cast<WavpackContext*>(m_wpc));
+    const auto sampleCount = WavpackGetNumSamples(static_cast<WavpackContext*>(m_wpc));
+    if (!initChannelCountOnce(channelCount) || !initSampleRateOnce(sampleRate) ||
+            sampleCount <= 0 || !initFrameIndexRangeOnce(
+                    mixxx::IndexRange::forward(0, sampleCount))) {
+        kLogger.warning() << "Invalid WavPack stream information:" << getUrlString();
+        return OpenResult::Failed;
+    }
 
     if (WavpackGetMode(static_cast<WavpackContext*>(m_wpc)) & MODE_FLOAT) {
         m_sampleScaleFactor = CSAMPLE_PEAK;
@@ -192,14 +220,20 @@ uint32_t SoundSourceWV::GetPosCallback(void* id) {
     if (!pFile) {
         return 0;
     }
-    return pFile->pos();
+    const qint64 position = pFile->pos();
+    if (position < 0 ||
+            static_cast<quint64>(position) >
+                    std::numeric_limits<std::uint32_t>::max()) {
+        return 0;
+    }
+    return static_cast<std::uint32_t>(position);
 }
 
 //static
 int SoundSourceWV::SetPosAbsCallback(void* id, unsigned int pos) {
     QFile* pFile = static_cast<QFile*>(id);
     if (!pFile) {
-        return 0;
+        return -1;
     }
     return pFile->seek(pos) ? 0 : -1;
 }
@@ -208,19 +242,27 @@ int SoundSourceWV::SetPosAbsCallback(void* id, unsigned int pos) {
 int SoundSourceWV::SetPosRelCallback(void* id, int delta, int mode) {
     QFile* pFile = static_cast<QFile*>(id);
     if (!pFile) {
-        return 0;
+        return -1;
     }
 
+    qint64 basePosition = 0;
     switch (mode) {
     case SEEK_SET:
-        return pFile->seek(delta) ? 0 : -1;
+        break;
     case SEEK_CUR:
-        return pFile->seek(pFile->pos() + delta) ? 0 : -1;
+        basePosition = pFile->pos();
+        break;
     case SEEK_END:
-        return pFile->seek(pFile->size() + delta) ? 0 : -1;
+        basePosition = pFile->size();
+        break;
     default:
         return -1;
     }
+    if (basePosition < 0 || delta < -basePosition ||
+            delta > std::numeric_limits<qint64>::max() - basePosition) {
+        return -1;
+    }
+    return pFile->seek(basePosition + delta) ? 0 : -1;
 }
 
 //static
@@ -239,7 +281,13 @@ uint32_t SoundSourceWV::GetlengthCallback(void* id) {
     if (!pFile) {
         return 0;
     }
-    return pFile->size();
+    const qint64 size = pFile->size();
+    if (size < 0 ||
+            static_cast<quint64>(size) >
+                    std::numeric_limits<std::uint32_t>::max()) {
+        return 0;
+    }
+    return static_cast<std::uint32_t>(size);
 }
 
 //static

@@ -7,6 +7,7 @@
 
 #include <QtDebug>
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 
 #include "audio/types.h"
@@ -229,7 +230,13 @@ void EncoderWave::flush() {
 }
 
 void EncoderWave::encodeBuffer(const CSAMPLE* pBuffer, const std::size_t bufferSize) {
-    sf_write_float(m_pSndfile, pBuffer, bufferSize);
+    if (!m_pSndfile || (bufferSize > 0 && !pBuffer) ||
+            static_cast<std::uintmax_t>(bufferSize) >
+                    static_cast<std::uintmax_t>(std::numeric_limits<sf_count_t>::max())) {
+        qWarning() << "EncoderWave: invalid sample buffer" << bufferSize;
+        return;
+    }
+    sf_write_float(m_pSndfile, pBuffer, static_cast<sf_count_t>(bufferSize));
 }
 
 /* Originally called from enginebroadcast.cpp to update metadata information
@@ -295,6 +302,10 @@ void EncoderWave::initStream() {
 int EncoderWave::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
     Q_UNUSED(pUserErrorMessage);
+    if (!sampleRate.isValid() || (m_channels != 1 && m_channels != 2) || !m_pCallback) {
+        qWarning() << "EncoderWave: invalid encoder settings or callback";
+        return -1;
+    }
     // set sfInfo.
     // m_sfInfo.format is setup on setEncoderSettings previous to calling initEncoder.
     m_sfInfo.samplerate = sampleRate;

@@ -285,9 +285,13 @@ int SoundSourceOggVorbis::CloseCallback(void* datasource) {
 long SoundSourceOggVorbis::TellCallback(void* datasource) {
     QFile* pFile = static_cast<QFile*>(datasource);
     if (!pFile) {
-        return 0;
+        return -1;
     }
-    return pFile->pos();
+    const qint64 position = pFile->pos();
+    if (position < 0 || position > std::numeric_limits<long>::max()) {
+        return -1;
+    }
+    return static_cast<long>(position);
 }
 
 } // namespace mixxx
