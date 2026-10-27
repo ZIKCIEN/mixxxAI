@@ -228,12 +228,15 @@ size_t SoundSourceOggVorbis::ReadCallback(void* ptr, size_t size, size_t nmemb, 
         return 0;
     }
 
-    const auto availableItems = static_cast<size_t>((fileSize - position) / size);
-    const size_t itemCount = std::min(availableItems, nmemb);
+    const auto availableItems = static_cast<quint64>((fileSize - position) / size);
+    const auto itemCount = std::min<quint64>(availableItems, nmemb);
     if (itemCount == 0) {
         return 0;
     }
 
+    if (itemCount > static_cast<quint64>(std::numeric_limits<qint64>::max()) / size) {
+        return 0;
+    }
     const qint64 bytesToRead = static_cast<qint64>(itemCount * size);
     const qint64 bytesRead = pFile->read(static_cast<char*>(ptr), bytesToRead);
     return bytesRead > 0 ? static_cast<size_t>(bytesRead / size) : 0;

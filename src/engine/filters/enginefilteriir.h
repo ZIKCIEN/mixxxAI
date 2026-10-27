@@ -105,6 +105,7 @@ class EngineFilterIIR : public EngineFilterIIRBase {
         }
         // Copy to dynamic-ish memory to prevent fidlib API breakage.
         std::strncpy(spec_d, spec, bufsize);
+        spec_d[bufsize < sizeof(spec_d) ? bufsize : sizeof(spec_d) - 1] = '\0';
 
         // Copy the old coefficients into m_oldCoef
         memcpy(m_oldCoef, m_coef, sizeof(m_coef));
@@ -165,21 +166,21 @@ class EngineFilterIIR : public EngineFilterIIRBase {
         // Copy to dynamic-ish memory to prevent fidlib API breakage.
         std::strncpy(spec1_d, spec1, spec1size);
         std::strncpy(spec2_d, spec2, spec2size);
-        spec1_d[FIDSPEC_LENGTH - 1] = '\0';
-        spec2_d[FIDSPEC_LENGTH - 1] = '\0';
+        spec1_d[spec1size < sizeof(spec1_d) ? spec1size : sizeof(spec1_d) - 1] = '\0';
+        spec2_d[spec2size < sizeof(spec2_d) ? spec2size : sizeof(spec2_d) - 1] = '\0';
 
         // Copy the old coefficients into m_oldCoef
         memcpy(m_oldCoef, m_coef, sizeof(m_coef));
         m_coef[0] = fid_design_coef(m_coef + 1,
                             n_coef1,
-                            spec1,
+                            spec1_d,
                             sampleRate,
                             freq01,
                             freq11,
                             adj1) *
                 fid_design_coef(m_coef + 1 + n_coef1,
                         SIZE - n_coef1,
-                        spec2,
+                        spec2_d,
                         sampleRate,
                         freq02,
                         freq12,

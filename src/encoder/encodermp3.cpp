@@ -2,6 +2,8 @@
 
 #include <id3v2tag.h>
 
+#include <limits>
+
 #include "audio/types.h"
 #include "encoder/encodercallback.h"
 #include "encoder/encodermp3settings.h"
@@ -203,6 +205,14 @@ void EncoderMp3::flush() {
 
 void EncoderMp3::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
     if (m_lameFlags == nullptr || m_flushed) {
+        return;
+    }
+    constexpr auto maxBufferSizeForLame =
+            (static_cast<std::size_t>(std::numeric_limits<int>::max()) - 7201) / 5 * 4;
+    if ((bufferSize > 0 && !samples) || bufferSize % 2 != 0 ||
+            bufferSize > maxBufferSizeForLame ||
+            bufferSize > std::numeric_limits<std::size_t>::max() / sizeof(float)) {
+        qWarning() << "EncoderMp3: invalid sample buffer size" << bufferSize;
         return;
     }
     std::size_t outsize = 0;

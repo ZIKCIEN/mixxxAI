@@ -208,6 +208,10 @@ void EncoderWave::flush() {
             reinterpret_cast<const unsigned char*>(tagBuffer.data()),
             0,
             tagBuffer.size());
+    if (tagBuffer.size() % 2 != 0) {
+        const unsigned char padding = 0;
+        m_pCallback->write(nullptr, &padding, 0, 1);
+    }
 
     // Update the file header with the new file size
     const qint64 fileSize = m_pCallback->tell();

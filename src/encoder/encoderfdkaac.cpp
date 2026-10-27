@@ -255,6 +255,12 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
         QString* pUserErrorMessage) {
     m_sampleRate = sampleRate;
 
+    if (!sampleRate.isValid() || (m_channels != 1 && m_channels != 2) || m_bitrate <= 0 ||
+            m_bitrate > std::numeric_limits<int>::max() / 1000) {
+        kLogger.warning() << "initEncoder failed: invalid AAC encoder settings";
+        return -1;
+    }
+
     if (!m_pLibrary) {
         kLogger.warning() << "initEncoder failed: fdk-aac library not loaded";
         if (pUserErrorMessage) {
@@ -369,7 +375,7 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
 }
 
 void EncoderFdkAac::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    if (!m_pInputFifo || m_channels <= 0 ||
+    if (!m_pInputFifo || m_channels <= 0 || (bufferSize > 0 && !samples) ||
             bufferSize > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
             bufferSize % static_cast<std::size_t>(m_channels) != 0) {
         return;
@@ -382,6 +388,7 @@ void EncoderFdkAac::encodeBuffer(const CSAMPLE* samples, const std::size_t buffe
                           << "; available: " << writeAvailable;
         writeCount = writeAvailable;
     }
+    writeCount -= writeCount % m_channels;
     if (writeCount > 0) {
         SAMPLE* dataPtr1;
         ring_buffer_size_t size1;
@@ -446,6 +453,13 @@ void EncoderFdkAac::processFIFO() {
         int result = aacEncEncode(m_aacEnc, &inputBuf, &outputBuf, &inputDesc, &outputDesc);
         if (result != AACENC_OK) {
             kLogger.warning() << "aacEncEncode failed! error code:" << result;
+            return;
+        }
+
+        if (outputDesc.numOutBytes < 0 ||
+                outputDesc.numOutBytes > static_cast<int>(m_pAacDataBuffer.size())) {
+            kLogger.warning() << "aacEncEncode returned an invalid output size:"
+                              << outputDesc.numOutBytes;
             return;
         }
 
