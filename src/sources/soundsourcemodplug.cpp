@@ -125,8 +125,11 @@ SoundSource::OpenResult SoundSourceModPlug::tryOpen(
     const QString fileName(getLocalFileName());
     QFile modFile(fileName);
     kLogger.debug() << "Loading ModPlug module " << modFile.fileName();
-    [[maybe_unused]] auto result = modFile.open(QIODevice::ReadOnly);
-    DEBUG_ASSERT(result);
+    if (!modFile.open(QIODevice::ReadOnly)) {
+        kLogger.warning() << "Failed to open ModPlug module:" << fileName
+                          << modFile.errorString();
+        return OpenResult::Failed;
+    }
     m_fileBuf = modFile.readAll();
     modFile.close();
 
@@ -169,7 +172,12 @@ SoundSource::OpenResult SoundSourceModPlug::tryOpen(
                 kChunkSizeInBytes);
         // adjust size of sample buffer after reading
         if (0 < bytesRead) {
-            DEBUG_ASSERT(0 == (bytesRead % sizeof(m_sampleBuf[0])));
+            if (bytesRead > kChunkSizeInBytes ||
+                    bytesRead % sizeof(m_sampleBuf[0]) != 0) {
+                kLogger.warning() << "ModPlug returned an invalid sample block size"
+                                  << bytesRead;
+                return OpenResult::Failed;
+            }
             const ModSampleBuffer::size_type samplesRead = bytesRead / sizeof(m_sampleBuf[0]);
             m_sampleBuf.resize(currentSize + samplesRead);
         } else {
@@ -184,12 +192,14 @@ SoundSource::OpenResult SoundSourceModPlug::tryOpen(
                     << m_sampleBuf.capacity() - m_sampleBuf.size()
                     << " samples unused capacity.";
 
-    initChannelCountOnce(kChannelCount);
-    initSampleRateOnce(kSampleRate);
-    initFrameIndexRangeOnce(
-            IndexRange::forward(
+    if (m_sampleBuf.empty() || !initChannelCountOnce(kChannelCount) ||
+            !initSampleRateOnce(kSampleRate) ||
+            !initFrameIndexRangeOnce(IndexRange::forward(
                     0,
-                    getSignalInfo().samples2frames(static_cast<SINT>(m_sampleBuf.size()))));
+                    getSignalInfo().samples2frames(static_cast<SINT>(m_sampleBuf.size()))))) {
+        kLogger.warning() << "Invalid or empty ModPlug stream:" << fileName;
+        return OpenResult::Failed;
+    }
 
     return OpenResult::Succeeded;
 }

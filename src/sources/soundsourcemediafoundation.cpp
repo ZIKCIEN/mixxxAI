@@ -794,7 +794,11 @@ bool SoundSourceMediaFoundation::configureAudioStream(const OpenParams& openPara
         safeRelease(&pAudioType);
         return false;
     }
-    initChannelCountOnce(numChannels);
+    if (!initChannelCountOnce(numChannels)) {
+        kLogger.warning() << "Invalid Media Foundation channel count" << numChannels;
+        safeRelease(&pAudioType);
+        return false;
+    }
 
     UINT32 samplesPerSecond;
     hr = pAudioType->GetUINT32(
@@ -805,7 +809,11 @@ bool SoundSourceMediaFoundation::configureAudioStream(const OpenParams& openPara
         safeRelease(&pAudioType);
         return false;
     }
-    initSampleRateOnce(samplesPerSecond);
+    if (!initSampleRateOnce(samplesPerSecond)) {
+        kLogger.warning() << "Invalid Media Foundation sample rate" << samplesPerSecond;
+        safeRelease(&pAudioType);
+        return false;
+    }
 
     UINT32 leftoverBufferSizeInBytes = 0;
     hr = pAudioType->GetUINT32(MF_MT_SAMPLE_SIZE, &leftoverBufferSizeInBytes);
@@ -815,7 +823,13 @@ bool SoundSourceMediaFoundation::configureAudioStream(const OpenParams& openPara
         safeRelease(&pAudioType);
         return false;
     }
-    DEBUG_ASSERT((leftoverBufferSizeInBytes % kBytesPerSample) == 0);
+    if (leftoverBufferSizeInBytes == 0 ||
+            (leftoverBufferSizeInBytes % kBytesPerSample) != 0) {
+        kLogger.warning() << "Invalid Media Foundation sample buffer size"
+                          << leftoverBufferSizeInBytes;
+        safeRelease(&pAudioType);
+        return false;
+    }
     const SINT sampleBufferCapacity =
             leftoverBufferSizeInBytes / kBytesPerSample;
     if (m_sampleBuffer.capacity() < sampleBufferCapacity) {
@@ -832,6 +846,7 @@ bool SoundSourceMediaFoundation::configureAudioStream(const OpenParams& openPara
 
 bool SoundSourceMediaFoundation::readProperties() {
     PROPVARIANT prop;
+    PropVariantInit(&prop);
     HRESULT hr = S_OK;
 
     //Get the duration, provided as a 64-bit integer of 100-nanosecond units
@@ -840,14 +855,17 @@ bool SoundSourceMediaFoundation::readProperties() {
             &prop);
     if (FAILED(hr)) {
         kLogger.warning() << "error getting duration";
+        PropVariantClear(&prop);
         return false;
     }
-    initFrameIndexRangeOnce(
-            mixxx::IndexRange::forward(
-                    0,
-                    m_streamUnitConverter.toFrameIndex(prop.hVal.QuadPart)));
-    kLogger.debug() << "Frame index range" << frameIndexRange();
+    const auto frameEnd = m_streamUnitConverter.toFrameIndex(prop.hVal.QuadPart);
     PropVariantClear(&prop);
+    if (frameEnd <= 0 ||
+            !initFrameIndexRangeOnce(mixxx::IndexRange::forward(0, frameEnd))) {
+        kLogger.warning() << "Invalid Media Foundation stream duration";
+        return false;
+    }
+    kLogger.debug() << "Frame index range" << frameIndexRange();
 
     return true;
 }

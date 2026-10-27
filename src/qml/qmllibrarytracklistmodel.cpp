@@ -76,7 +76,7 @@ QVariant QmlLibraryTrackListModel::data(const QModelIndex& proxyIndex, int role)
         return {};
     }
     auto columnIdx = proxyIndex.column();
-    VERIFY_OR_DEBUG_ASSERT(columnIdx >= 0 || columnIdx < m_columns.size()) {
+    VERIFY_OR_DEBUG_ASSERT(columnIdx >= 0 && columnIdx < m_columns.size()) {
         return {};
     }
 
@@ -156,7 +156,7 @@ int QmlLibraryTrackListModel::columnCount(const QModelIndex& parent) const {
 
 QVariant QmlLibraryTrackListModel::headerData(
         int section, Qt::Orientation orientation, int role) const {
-    VERIFY_OR_DEBUG_ASSERT(section >= 0 || section < m_columns.size()) {
+    VERIFY_OR_DEBUG_ASSERT(section >= 0 && section < m_columns.size()) {
         return {};
     }
     // TODO role
@@ -208,7 +208,7 @@ void QmlLibraryTrackListModel::search(const QString& searchText) {
 }
 
 void QmlLibraryTrackListModel::sort(int column, Qt::SortOrder order) {
-    VERIFY_OR_DEBUG_ASSERT(column >= 0 || column < m_columns.size()) {
+    VERIFY_OR_DEBUG_ASSERT(column >= 0 && column < m_columns.size()) {
         return;
     }
     const auto& pColumn = m_columns[column];

@@ -136,9 +136,11 @@ SoundSource::OpenResult SoundSourceOpus::tryOpen(
                 // preserve mono signals if stereo signal is not requested explicitly
                 ((params.getSignalInfo().getChannelCount() == 2) || (streamChannelCount > 2));
         if (enforceStereoDecoding) {
-            initChannelCountOnce(2);
-        } else {
-            initChannelCountOnce(streamChannelCount);
+            if (!initChannelCountOnce(2)) {
+                return OpenResult::Failed;
+            }
+        } else if (!initChannelCountOnce(streamChannelCount)) {
+            return OpenResult::Failed;
         }
     } else {
         kLogger.warning()
@@ -152,8 +154,7 @@ SoundSource::OpenResult SoundSourceOpus::tryOpen(
     SampleBuffer(prefetchChannelCount * kNumberOfPrefetchFrames).swap(m_prefetchSampleBuffer);
 
     const ogg_int64_t pcmTotal = op_pcm_total(m_pOggOpusFile, kEntireStreamLink);
-    if (0 <= pcmTotal) {
-        initFrameIndexRangeOnce(IndexRange::forward(0, pcmTotal));
+    if (0 < pcmTotal && initFrameIndexRangeOnce(IndexRange::forward(0, pcmTotal))) {
     } else {
         kLogger.warning()
                 << "Failed to read total length of OggOpus file:"
@@ -162,8 +163,7 @@ SoundSource::OpenResult SoundSourceOpus::tryOpen(
     }
 
     const opus_int32 bitrate = op_bitrate(m_pOggOpusFile, kEntireStreamLink);
-    if (0 < bitrate) {
-        initBitrateOnce(bitrate / 1000);
+    if (0 < bitrate && initBitrateOnce(bitrate / 1000)) {
     } else {
         kLogger.warning()
                 << "Failed to determine bitrate of OggOpus file:"
@@ -171,7 +171,11 @@ SoundSource::OpenResult SoundSourceOpus::tryOpen(
         return OpenResult::Failed;
     }
 
-    initSampleRateOnce(kSampleRate);
+    if (!initSampleRateOnce(kSampleRate)) {
+        kLogger.warning() << "Failed to initialize sample rate of OggOpus file:"
+                          << getUrlString();
+        return OpenResult::Failed;
+    }
 
     m_curFrameIndex = frameIndexMin();
 

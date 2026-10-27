@@ -116,9 +116,12 @@ SoundSource::OpenResult SoundSourceSndFile::tryOpen(
         }
     }
 
-    initChannelCountOnce(sfInfo.channels);
-    initSampleRateOnce(sfInfo.samplerate);
-    initFrameIndexRangeOnce(IndexRange::forward(0, sfInfo.frames));
+    if (sfInfo.frames <= 0 || !initChannelCountOnce(sfInfo.channels) ||
+            !initSampleRateOnce(sfInfo.samplerate) ||
+            !initFrameIndexRangeOnce(IndexRange::forward(0, sfInfo.frames))) {
+        kLogger.warning() << "Invalid sound file stream information:" << getUrlString();
+        return OpenResult::Failed;
+    }
 
     m_curFrameIndex = frameIndexMin();
 

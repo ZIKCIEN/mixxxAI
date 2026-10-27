@@ -101,8 +101,10 @@ SoundSource::OpenResult SoundSourceOggVorbis::tryOpen(
                 << getUrlString();
         return OpenResult::Failed;
     }
-    initChannelCountOnce(vi->channels);
-    initSampleRateOnce(vi->rate);
+    if (!initChannelCountOnce(vi->channels) || !initSampleRateOnce(vi->rate)) {
+        kLogger.warning() << "Invalid stream signal information in" << getUrlString();
+        return OpenResult::Failed;
+    }
     if (0 < vi->bitrate_nominal) {
         initBitrateOnce(vi->bitrate_nominal / 1000);
     } else {
@@ -112,8 +114,7 @@ SoundSource::OpenResult SoundSourceOggVorbis::tryOpen(
     }
 
     ogg_int64_t pcmTotal = ov_pcm_total(&m_vf, kEntireBitstreamLink);
-    if (0 <= pcmTotal) {
-        initFrameIndexRangeOnce(IndexRange::forward(0, pcmTotal));
+    if (0 < pcmTotal && initFrameIndexRangeOnce(IndexRange::forward(0, pcmTotal))) {
     } else {
         kLogger.warning()
                 << "Failed to read read total length of"

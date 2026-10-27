@@ -1,6 +1,8 @@
 #include "sources/soundsourcemp3.h"
 #include "sources/mp3decoding.h"
 
+#include <limits>
+
 #include "util/logger.h"
 #include "util/math.h"
 
@@ -230,7 +232,17 @@ SoundSource::OpenResult SoundSourceMp3::tryOpen(
 
     // Get a pointer to the file using memory mapped IO
     m_fileSize = m_file.size();
+    if (m_fileSize <= 0 || static_cast<quint64>(m_fileSize) >
+                    std::numeric_limits<unsigned long>::max()) {
+        kLogger.warning() << "MP3 file has an invalid or unsupported size:"
+                          << m_file.fileName();
+        return OpenResult::Failed;
+    }
     m_pFileData = m_file.map(0, m_fileSize);
+    if (!m_pFileData) {
+        kLogger.warning() << "Failed to map MP3 file into memory:" << m_file.fileName();
+        return OpenResult::Failed;
+    }
     // NOTE(uklotzde): If the file disappears unexpectedly while mapped
     // a SIGBUS error might occur that is not handled and will terminate
     // Mixxx immediately. This behavior is documented in the manpage of

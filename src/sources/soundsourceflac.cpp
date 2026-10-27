@@ -142,6 +142,13 @@ SoundSource::OpenResult SoundSourceFLAC::tryOpen(
                 << FLAC__stream_decoder_get_state(m_decoder);
         return OpenResult::Failed;
     }
+    if (!getSignalInfo().getChannelCount().isValid() ||
+            !getSignalInfo().getSampleRate().isValid() || frameLength() <= 0 ||
+            m_bitsPerSample < 4 || m_bitsPerSample > 32 || m_maxBlocksize <= 0) {
+        kLogger.warning() << "Invalid or incomplete FLAC stream information:"
+                          << m_file.fileName();
+        return OpenResult::Failed;
+    }
 
     m_curFrameIndex = frameIndexMin();
 

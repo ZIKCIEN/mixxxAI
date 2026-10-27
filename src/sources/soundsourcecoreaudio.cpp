@@ -1,5 +1,8 @@
 #include "sources/soundsourcecoreaudio.h"
 
+#include <cmath>
+#include <limits>
+
 #include "engine/engine.h"
 #include "sources/mp3decoding.h"
 #include "util/appleosversion.h"
@@ -58,6 +61,7 @@ SoundSourceCoreAudio::SoundSourceCoreAudio(QUrl url)
         : SoundSource(url),
           LegacyAudioSourceAdapter(this, this),
           m_bFileIsMp3(false),
+          m_audioFile(nullptr),
           m_leadingFrames(0),
           m_seekPrefetchFrames(0) {
 }
@@ -79,9 +83,17 @@ SoundSource::OpenResult SoundSourceCoreAudio::tryOpen(
     CFStringRef urlStr = CFStringCreateWithCharacters(0,
             reinterpret_cast<const UniChar*>(fileName.unicode()),
             fileName.size());
+    if (!urlStr) {
+        kLogger.warning() << "Failed to create Core Foundation path for" << fileName;
+        return OpenResult::Failed;
+    }
     CFURLRef urlRef = CFURLCreateWithFileSystemPath(nullptr, urlStr, kCFURLPOSIXPathStyle, false);
-    err = ExtAudioFileOpenURL(urlRef, &m_audioFile);
     CFRelease(urlStr);
+    if (!urlRef) {
+        kLogger.warning() << "Failed to create Core Foundation URL for" << fileName;
+        return OpenResult::Failed;
+    }
+    err = ExtAudioFileOpenURL(urlRef, &m_audioFile);
     CFRelease(urlRef);
 
     /** TODO: Use FSRef for compatibility with 10.4 Tiger.
@@ -114,6 +126,14 @@ SoundSource::OpenResult SoundSourceCoreAudio::tryOpen(
         return OpenResult::Aborted;
     }
     m_bFileIsMp3 = m_inputFormat.mFormatID == kAudioFormatMPEGLayer3;
+    const double inputSampleRate = m_inputFormat.mSampleRate;
+    if (!std::isfinite(inputSampleRate) || inputSampleRate <= 0 ||
+            inputSampleRate > std::numeric_limits<SINT>::max() ||
+            std::round(inputSampleRate) != inputSampleRate) {
+        kLogger.warning() << "Invalid Core Audio sample rate" << inputSampleRate
+                          << fileName;
+        return OpenResult::Failed;
+    }
 
     VERIFY_OR_DEBUG_ASSERT(m_inputFormat.mChannelsPerFrame != 0) {
         kLogger.warning()
@@ -199,11 +219,20 @@ SoundSource::OpenResult SoundSourceCoreAudio::tryOpen(
         return OpenResult::Failed;
     }
 
-    initChannelCountOnce(m_outputFormat.NumberChannels());
-    DEBUG_ASSERT(std::round(m_inputFormat.mSampleRate) == m_inputFormat.mSampleRate);
-    initSampleRateOnce(static_cast<SINT>(m_inputFormat.mSampleRate));
+    if (!initChannelCountOnce(m_outputFormat.NumberChannels())) {
+        kLogger.warning() << "Invalid Core Audio channel count" << fileName;
+        return OpenResult::Failed;
+    }
+    if (!initSampleRateOnce(static_cast<SINT>(inputSampleRate))) {
+        kLogger.warning() << "Invalid Core Audio sample rate" << fileName;
+        return OpenResult::Failed;
+    }
     // TODO(XXX): Reduce totalFrameCount by m_leadingFrames???
-    initFrameIndexRangeOnce(IndexRange::forward(m_leadingFrames, totalFrameCount));
+    if (totalFrameCount < m_leadingFrames ||
+            !initFrameIndexRangeOnce(IndexRange::forward(m_leadingFrames, totalFrameCount))) {
+        kLogger.warning() << "Invalid Core Audio frame range" << fileName;
+        return OpenResult::Failed;
+    }
 
     if (m_bFileIsMp3) {
         // Use the maximum value for MP3 files to ensure that all decoded samples
@@ -221,7 +250,10 @@ SoundSource::OpenResult SoundSourceCoreAudio::tryOpen(
 } // namespace mixxx
 
 void SoundSourceCoreAudio::close() {
-    ExtAudioFileDispose(m_audioFile);
+    if (m_audioFile) {
+        ExtAudioFileDispose(m_audioFile);
+        m_audioFile = nullptr;
+    }
 }
 
 SINT SoundSourceCoreAudio::seekSampleFrame(SINT frameIndex) {

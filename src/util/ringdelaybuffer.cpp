@@ -16,8 +16,10 @@ SINT copyRing(const std::span<const CSAMPLE> sourceBuffer,
         const std::span<CSAMPLE> destBuffer,
         SINT destPos,
         const SINT numItems) {
-    const unsigned int newSourcePos = sourcePos + numItems;
-    const unsigned int newDestPos = destPos + numItems;
+    const std::size_t newSourcePos = static_cast<std::size_t>(sourcePos) +
+            static_cast<std::size_t>(numItems);
+    const std::size_t newDestPos = static_cast<std::size_t>(destPos) +
+            static_cast<std::size_t>(numItems);
 
     SINT sourceRemainingItems = sourceBuffer.size() - sourcePos;
     SINT destRemainingItems = destBuffer.size() - destPos;
@@ -79,14 +81,15 @@ RingDelayBuffer::RingDelayBuffer(SINT bufferSize)
 }
 
 SINT RingDelayBuffer::read(std::span<CSAMPLE> destinationBuffer, const SINT delayItems) {
-    const SINT itemsToRead = destinationBuffer.size();
-    const SINT shift = itemsToRead + delayItems;
-
-    // The reading position shift against the write position
-    // has to be smaller or equal to the ring buffer size.
-    VERIFY_OR_DEBUG_ASSERT(shift <= m_buffer.size()) {
+    if (m_buffer.size() <= 0 || delayItems < 0 ||
+            destinationBuffer.size() > static_cast<std::size_t>(m_buffer.size())) {
         return 0;
     }
+    const SINT itemsToRead = static_cast<SINT>(destinationBuffer.size());
+    if (delayItems > m_buffer.size() - itemsToRead) {
+        return 0;
+    }
+    const SINT shift = itemsToRead + delayItems;
 
     SINT readPos = m_writePos - shift;
 
@@ -105,9 +108,12 @@ SINT RingDelayBuffer::read(std::span<CSAMPLE> destinationBuffer, const SINT dela
 }
 
 SINT RingDelayBuffer::write(std::span<const CSAMPLE> sourceBuffer) {
-    const SINT itemsToWrite = sourceBuffer.size();
-
-    VERIFY_OR_DEBUG_ASSERT(itemsToWrite <= m_buffer.size()) {
+    if (m_buffer.size() <= 0 ||
+            sourceBuffer.size() > static_cast<std::size_t>(m_buffer.size())) {
+        return 0;
+    }
+    const SINT itemsToWrite = static_cast<SINT>(sourceBuffer.size());
+    if (itemsToWrite == 0) {
         return 0;
     }
 
