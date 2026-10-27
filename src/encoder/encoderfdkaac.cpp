@@ -7,6 +7,7 @@
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
+#include <limits>
 
 #include "encoder/encodercallback.h"
 #include "engine/sidechain/enginesidechain.h"
@@ -126,11 +127,12 @@ EncoderFdkAac::EncoderFdkAac(EncoderCallback* pCallback)
             !aacEncEncode ||
             !aacEncInfo ||
             !aacEncoder_SetParam) {
+        const QString libraryFileName = m_pLibrary->fileName();
         m_pLibrary->unload();
         m_pLibrary = nullptr;
 
         kLogger.warning() << "Failed to load AAC encoder library: Interface of"
-                          << m_pLibrary->fileName() << "is not as expected";
+                          << libraryFileName << "is not as expected";
 
         kLogger.debug() << "aacEncGetLibInfo:" << reinterpret_cast<void*>(aacEncGetLibInfo);
         kLogger.debug() << "aacEncOpen:" << reinterpret_cast<void*>(aacEncOpen);
@@ -156,9 +158,11 @@ EncoderFdkAac::EncoderFdkAac(EncoderCallback* pCallback)
 
 EncoderFdkAac::~EncoderFdkAac() {
     if (m_pLibrary && m_pLibrary->isLoaded()) {
-        aacEncClose(&m_aacEnc);
-
         flush();
+        if (m_aacEnc) {
+            aacEncClose(&m_aacEnc);
+            m_aacEnc = nullptr;
+        }
         m_pLibrary->unload();
         kLogger.debug() << "Unloaded libfdk-aac";
     }
@@ -279,7 +283,11 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
 
     // This initializes the encoder handle but not the encoder itself.
     // Actual encoder init is done below.
-    aacEncOpen(&m_aacEnc, 0, m_channels);
+    const AACENC_ERROR openResult = aacEncOpen(&m_aacEnc, 0, m_channels);
+    if (openResult != AACENC_OK || !m_aacEnc) {
+        kLogger.warning() << "aac encoder open failed! error code:" << openResult;
+        return -1;
+    }
     m_pAacDataBuffer.resize(kOutBufferBits * m_channels);
 
     // AAC Object Type: specifies "mode": AAC-LC, HE-AAC, HE-AACv2, DAB AAC, etc...
@@ -333,7 +341,15 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
         return -1;
     }
 
-    aacEncInfo(m_aacEnc, &m_aacInfo);
+    const AACENC_ERROR infoResult = aacEncInfo(m_aacEnc, &m_aacInfo);
+    constexpr int maxInputSampleCount = EngineSideChain::SIDECHAIN_BUFFER_SIZE * 2;
+    if (infoResult != AACENC_OK || m_aacInfo.frameLength <= 0 || m_channels <= 0 ||
+            m_aacInfo.frameLength > std::numeric_limits<int>::max() / m_channels ||
+            m_aacInfo.frameLength > maxInputSampleCount / m_channels) {
+        kLogger.warning() << "aac encoder info failed or returned an invalid frame length:"
+                          << infoResult << m_aacInfo.frameLength << m_channels;
+        return -1;
+    }
     m_readRequired = m_aacInfo.frameLength * m_channels;
 
     // Size the input FIFO buffer with twice the maximum possible sample count that can be
@@ -348,12 +364,14 @@ int EncoderFdkAac::initEncoder(mixxx::audio::SampleRate sampleRate,
     }
     m_pInputFifo = new FIFO<SAMPLE>(EngineSideChain::SIDECHAIN_BUFFER_SIZE * 2);
 
-    m_pFifoChunkBuffer.resize(m_readRequired * sizeof(SAMPLE));
+    m_pFifoChunkBuffer.resize(static_cast<std::size_t>(m_readRequired));
     return 0;
 }
 
 void EncoderFdkAac::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    if (!m_pInputFifo) {
+    if (!m_pInputFifo || m_channels <= 0 ||
+            bufferSize > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+            bufferSize % static_cast<std::size_t>(m_channels) != 0) {
         return;
     }
     int writeCount = static_cast<int>(bufferSize);

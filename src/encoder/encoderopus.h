@@ -42,6 +42,7 @@ class EncoderOpus: public Encoder {
     void pushTagsPacket();
     void writePage(ogg_packet* pPacket);
     void processFIFO();
+    void encodeChunk(bool endOfStream);
 
     int m_bitrate;
     int m_bitrateMode;
@@ -57,6 +58,8 @@ class EncoderOpus: public Encoder {
     ogg_page m_oggPage;
     bool m_header_write;
     int m_packetNumber;
+    int m_preSkip;
     ogg_int64_t m_granulePos;
+    ogg_int64_t m_totalSamples;
     QMap<QString, QString> m_opusComments;
 };

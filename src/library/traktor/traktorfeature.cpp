@@ -588,6 +588,10 @@ void TraktorFeature::parsePlaylistEntries(
     while (id_query.next()) {
         playlist_id = id_query.value(idColumn).toInt();
     }
+    if (playlist_id == kInvalidPlaylistId) {
+        qWarning() << "Could not find inserted Traktor playlist:" << playlist_path;
+        return;
+    }
 
     int playlist_position = 1;
     while (!xml.atEnd() && !m_cancelImport) {
@@ -618,14 +622,20 @@ void TraktorFeature::parsePlaylistEntries(
                     if (finder_query.next()) {
                         track_id = finder_query.value(finder_query.record().indexOf("id")).toInt();
                     }
+                    if (track_id == kInvalidPlaylistId) {
+                        qDebug() << "Skipping missing track in Traktor playlist:" << key;
+                        continue;
+                    }
 
                     pQueryInsertIntoPlaylistTracks->bindValue(":playlist_id", playlist_id);
                     pQueryInsertIntoPlaylistTracks->bindValue(":track_id", track_id);
-                    pQueryInsertIntoPlaylistTracks->bindValue(":position", playlist_position++);
+                    pQueryInsertIntoPlaylistTracks->bindValue(":position", playlist_position);
                     if (!pQueryInsertIntoPlaylistTracks->exec()) {
                         LOG_FAILED_QUERY(*pQueryInsertIntoPlaylistTracks)
                                 << "trackid" << track_id << " with path " << key
                                 << "playlistname; " << playlist_path << " with ID " << playlist_id;
+                    } else {
+                        playlist_position++;
                     }
                 }
             }

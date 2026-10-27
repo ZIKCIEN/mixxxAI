@@ -6,6 +6,8 @@
 #include <QMapIterator>
 #include <QRandomGenerator>
 #include <QtGlobal>
+#include <algorithm>
+#include <limits>
 
 #include "encoder/encodercallback.h"
 #include "encoder/encoderopussettings.h"
@@ -99,7 +101,9 @@ EncoderOpus::EncoderOpus(EncoderCallback* pCallback)
       m_opusDataBuffer(kMaxOpusBufferSize),
       m_header_write(false),
       m_packetNumber(0),
-      m_granulePos(0)
+      m_preSkip(0),
+      m_granulePos(0),
+      m_totalSamples(0)
 {
     // Regarding m_pFifoBuffer:
     // Size the input FIFO buffer with twice the maximum possible sample count that can be
@@ -200,6 +204,7 @@ void EncoderOpus::initStream() {
     ogg_stream_init(&m_oggStream, getSerial());
     m_header_write = true;
     m_granulePos = 0;
+    m_totalSamples = 0;
     m_packetNumber = 0;
 
     pushHeaderPacket();
@@ -235,10 +240,10 @@ void EncoderOpus::pushHeaderPacket() {
     frame.append(static_cast<unsigned char>(m_channels));
 
     // Pre-skip (2 bytes, little-endian)
-    int preskip = 0;
-    opus_encoder_ctl(m_pOpus, OPUS_GET_LOOKAHEAD(&preskip));
+    opus_encoder_ctl(m_pOpus, OPUS_GET_LOOKAHEAD(&m_preSkip));
+    m_granulePos = m_preSkip;
     for (int x = 0; x < 2; x++) {
-        unsigned char preskipByte = (preskip >> (x*8)) & 0xFF;
+        unsigned char preskipByte = (m_preSkip >> (x*8)) & 0xFF;
         frame.append(preskipByte);
     }
 
@@ -376,6 +381,12 @@ void EncoderOpus::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferS
         return;
     }
 
+    if (bufferSize > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+            bufferSize % static_cast<std::size_t>(m_channels) != 0) {
+        kLogger.warning() << "encodeBuffer: invalid sample count" << bufferSize;
+        return;
+    }
+
     int writeRequired = static_cast<int>(bufferSize);
     int writeAvailable = m_fifoBuffer.writeAvailable();
     if (writeRequired > writeAvailable) {
@@ -386,7 +397,8 @@ void EncoderOpus::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferS
 
     int writeCount = math_min(writeRequired, writeAvailable);
     if (writeCount > 0) {
-        m_fifoBuffer.write(samples, writeCount);
+        const int written = m_fifoBuffer.write(samples, writeCount);
+        m_totalSamples += written / m_channels;
     }
 
     processFIFO();
@@ -400,29 +412,29 @@ void EncoderOpus::processFIFO() {
             kLogger.warning() << "processFIFO: channel count doesn't match chunk size";
         }
 
-        int samplesPerChannel = m_readRequired / m_channels;
-        int result = opus_encode_float(m_pOpus,
-                m_pFifoChunkBuffer->data(), samplesPerChannel,
-                m_opusDataBuffer.data(), kMaxOpusBufferSize);
-
-        if (result < 1) {
-            kLogger.warning() << "opus_encode_float failed:" << opusErrorString(result);
-            return;
-        }
-
-        ogg_packet packet;
-        packet.b_o_s = 0;
-        packet.e_o_s = 0;
-        packet.granulepos = m_granulePos;
-        packet.packetno = m_packetNumber;
-        packet.packet = m_opusDataBuffer.data();
-        packet.bytes = result;
-
-        m_granulePos += samplesPerChannel;
-        m_packetNumber += 1;
-
-        writePage(&packet);
+        encodeChunk(false);
     }
+}
+
+void EncoderOpus::encodeChunk(bool endOfStream) {
+    const int samplesPerChannel = m_readRequired / m_channels;
+    const int result = opus_encode_float(m_pOpus,
+            m_pFifoChunkBuffer->data(), samplesPerChannel,
+            m_opusDataBuffer.data(), kMaxOpusBufferSize);
+    if (result < 1) {
+        kLogger.warning() << "opus_encode_float failed:" << opusErrorString(result);
+        return;
+    }
+
+    m_granulePos += samplesPerChannel;
+    ogg_packet packet;
+    packet.b_o_s = 0;
+    packet.e_o_s = endOfStream;
+    packet.granulepos = endOfStream ? m_preSkip + m_totalSamples : m_granulePos;
+    packet.packetno = m_packetNumber++;
+    packet.packet = m_opusDataBuffer.data();
+    packet.bytes = result;
+    writePage(&packet);
 }
 
 void EncoderOpus::writePage(ogg_packet* pPacket) {
@@ -461,6 +473,13 @@ void EncoderOpus::writePage(ogg_packet* pPacket) {
         m_pCallback->write(m_oggPage.header, m_oggPage.body,
                            m_oggPage.header_len, m_oggPage.body_len);
     } while(!ogg_page_eos(&m_oggPage));
+
+    if (pPacket->e_o_s) {
+        while (ogg_stream_flush(&m_oggStream, &m_oggPage) != 0) {
+            m_pCallback->write(m_oggPage.header, m_oggPage.body,
+                    m_oggPage.header_len, m_oggPage.body_len);
+        }
+    }
 }
 
 void EncoderOpus::updateMetaData(const QString& artist,
@@ -477,6 +496,16 @@ void EncoderOpus::updateMetaData(const QString& artist,
 }
 
 void EncoderOpus::flush() {
-    // At this point there may still be samples in the FIFO buffer
+    if (!m_pOpus) {
+        return;
+    }
     processFIFO();
+    const int remainingSamples = m_fifoBuffer.readAvailable();
+    if (remainingSamples > 0) {
+        m_fifoBuffer.read(m_pFifoChunkBuffer->data(), remainingSamples);
+    }
+    std::fill(m_pFifoChunkBuffer->data() + remainingSamples,
+            m_pFifoChunkBuffer->data() + m_readRequired,
+            0.0f);
+    encodeChunk(true);
 }

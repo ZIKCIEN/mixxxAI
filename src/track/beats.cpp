@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -255,6 +256,10 @@ mixxx::BeatsPointer Beats::fromByteArray(
         const QString& beatsVersion,
         const QString& beatsSubVersion,
         const QByteArray& byteArray) {
+    if (byteArray.size() > std::numeric_limits<int>::max()) {
+        qWarning() << "Failed to deserialize Beats: byte array is too large";
+        return nullptr;
+    }
     VERIFY_OR_DEBUG_ASSERT(!beatsVersion.isEmpty()) {
         return nullptr;
     }
@@ -356,7 +361,10 @@ QByteArray Beats::toBeatGridByteArray() const {
     grid.mutable_bpm()->set_bpm(m_lastMarkerBpm.value());
 
     std::string output;
-    grid.SerializeToString(&output);
+    if (!grid.SerializeToString(&output) ||
+            output.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
     return QByteArray(output.data(), static_cast<int>(output.length()));
 };
 
@@ -370,7 +378,10 @@ QByteArray Beats::toBeatMapByteArray() const {
     }
 
     std::string output;
-    map.SerializeToString(&output);
+    if (!map.SerializeToString(&output) ||
+            output.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
     return QByteArray(output.data(), static_cast<int>(output.length()));
 };
 

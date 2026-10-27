@@ -157,7 +157,7 @@ class Report {
     Report(const HidReportType& reportType, const std::uint8_t& reportId);
 
     void addControl(const Control& item);
-    void increasePosition(unsigned int bitSize);
+    bool increasePosition(std::uint64_t bitSize);
     std::uint16_t getLastBytePosition() const {
         return m_lastBytePosition;
     }
@@ -171,8 +171,9 @@ class Report {
 
     const HidReportType m_reportType;
     const std::uint8_t m_reportId;
-    std::uint16_t getReportSize() const {
-        return m_lastBytePosition;
+    std::size_t getReportSize() const {
+        return static_cast<std::size_t>(m_lastBytePosition) +
+                (m_lastBitPosition > 0 ? 1 : 0);
     }
 
   private:

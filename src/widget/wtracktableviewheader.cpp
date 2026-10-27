@@ -8,6 +8,8 @@
 #include <QTextOption>
 #include <QWidgetAction>
 
+#include <limits>
+
 #include "library/trackmodel.h"
 #include "moc_wtracktableviewheader.cpp"
 #include "util/math.h"
@@ -68,6 +70,10 @@ HeaderViewState::HeaderViewState(const WTrackTableViewHeader& headers) {
 HeaderViewState::HeaderViewState(const QString& base64serialized) {
     // First decode the array from Base64, then initialize the protobuf from it.
     QByteArray array = QByteArray::fromBase64(base64serialized.toLatin1());
+    if (array.size() > std::numeric_limits<int>::max()) {
+        qWarning() << "Could not parse m_view_state: byte array is too large" << array.size();
+        return;
+    }
     if (!m_view_state.ParseFromArray(array.constData(), array.size())) {
         qWarning() << "Could not parse m_view_state from QByteArray of size "
                    << array.size();
@@ -78,10 +84,17 @@ HeaderViewState::HeaderViewState(const QString& base64serialized) {
 QString HeaderViewState::saveState() const {
     // Serialize the proto to a byte array, then encode the array as Base64.
 #if GOOGLE_PROTOBUF_VERSION >= 3001000
-    int size = static_cast<int>(m_view_state.ByteSizeLong());
+    const auto protoSize = m_view_state.ByteSizeLong();
+    if (protoSize > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+    int size = static_cast<int>(protoSize);
 #else
     int size = m_view_state.ByteSize();
 #endif
+    if (size < 0) {
+        return {};
+    }
     QByteArray array(size, '\0');
     VERIFY_OR_DEBUG_ASSERT(m_view_state.SerializeToArray(array.data(), size)) {
         qWarning() << "Failed to serialize header view state";

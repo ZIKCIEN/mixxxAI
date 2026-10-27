@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
+#include <limits>
 #include <optional>
 
 #include "moc_hidreportdescriptor.cpp"
@@ -12,14 +14,21 @@ namespace hid::reportDescriptor {
 /// Extracts the value of the specified control in logical scale,
 /// from the given report data
 int32_t extractLogicalValue(const QByteArray& reportData, const Control& control) {
-    VERIFY_OR_DEBUG_ASSERT(control.m_bitSize > 0 && control.m_bitSize <= 32) {
+    VERIFY_OR_DEBUG_ASSERT(control.m_bitSize > 0 && control.m_bitSize <= 32 &&
+            control.m_bitPosition < 8) {
         return control.m_logicalMinimum; // Safe value in allowed range
     }
 
-    uint8_t numberOfBytesToCopy = ((control.m_bitPosition + control.m_bitSize - 1) / 8) + 1;
+    const qsizetype bytePosition = control.m_bytePosition;
+    const qsizetype numberOfBytesToCopy =
+            ((control.m_bitPosition + control.m_bitSize - 1) / 8) + 1;
+    if (bytePosition > reportData.size() ||
+            numberOfBytesToCopy > reportData.size() - bytePosition) {
+        return control.m_logicalMinimum;
+    }
 
     int64_t value = 0;
-    std::memcpy(&value, reportData.data() + control.m_bytePosition, numberOfBytesToCopy);
+    std::memcpy(&value, reportData.data() + bytePosition, numberOfBytesToCopy);
 
     value >>= control.m_bitPosition;
 
@@ -41,7 +50,8 @@ int32_t extractLogicalValue(const QByteArray& reportData, const Control& control
 /// Sets the bits in the report data of the specified control,
 /// to the given value in logical scale
 bool applyLogicalValue(QByteArray& reportData, const Control& control, int32_t controlValue) {
-    VERIFY_OR_DEBUG_ASSERT(control.m_bitSize > 0 && control.m_bitSize <= 32) {
+    VERIFY_OR_DEBUG_ASSERT(control.m_bitSize > 0 && control.m_bitSize <= 32 &&
+            control.m_bitPosition < 8) {
         return false;
     }
 
@@ -68,14 +78,15 @@ bool applyLogicalValue(QByteArray& reportData, const Control& control, int32_t c
     uint64_t value = (static_cast<uint64_t>(controlValue) << control.m_bitPosition) & mask;
 
     // Check if the value fits into the data (position + bitSize)
-    uint8_t lastByteToCopy = control.m_bytePosition +
+    const qsizetype bytePosition = control.m_bytePosition;
+    const qsizetype lastByteToCopy = bytePosition +
             (control.m_bitPosition + control.m_bitSize - 1) / 8;
 
     if (lastByteToCopy >= reportData.size()) {
         return false;
     }
 
-    for (uint8_t byteIdx = control.m_bytePosition; byteIdx <= lastByteToCopy; ++byteIdx) {
+    for (qsizetype byteIdx = bytePosition; byteIdx <= lastByteToCopy; ++byteIdx) {
         // Clear the bits that are part of the control
         reportData[byteIdx] &= ~static_cast<uint8_t>(mask & 0xFF);
         // Set the new value
@@ -111,10 +122,14 @@ QString getScaledUnitString(uint32_t unit) {
     auto appendQuantity = [&](int shift, const UnitInfo& unitInfo) {
         int8_t value = (unit >> shift) & 0xF;
         if (value != 0) {
+            const auto system = unit & 0xF;
+            if (system >= std::size(unitInfo.pPhysicalQuantity)) {
+                return;
+            }
             if (!unitString.isEmpty()) {
                 unitString += "*";
             }
-            unitString += unitInfo.pPhysicalQuantity[(unit & 0xF)];
+            unitString += unitInfo.pPhysicalQuantity[system];
             if (exponents[value] != 1) {
                 unitString += "^" + QString::number(exponents[value]);
             }
@@ -165,13 +180,16 @@ void Report::addControl(const Control& item) {
     m_controls.push_back(item);
 }
 
-void Report::increasePosition(unsigned int bitSize) {
-    // Calculate the new bit position
-    m_lastBitPosition += bitSize;
-
-    // If the bit position exceeds 8 bits, adjust the byte position
-    m_lastBytePosition += m_lastBitPosition / 8;
-    m_lastBitPosition %= 8;
+bool Report::increasePosition(std::uint64_t bitSize) {
+    const std::uint64_t totalBits = m_lastBitPosition + bitSize;
+    const std::uint64_t bytesToAdvance = totalBits / 8;
+    if (bytesToAdvance >
+            std::numeric_limits<std::uint16_t>::max() - m_lastBytePosition) {
+        return false;
+    }
+    m_lastBytePosition += static_cast<std::uint16_t>(bytesToAdvance);
+    m_lastBitPosition = static_cast<std::uint8_t>(totalBits % 8);
+    return true;
 }
 
 // Class for Collections
@@ -222,25 +240,25 @@ uint32_t HidReportDescriptor::readPayload(HidItemSize payloadSize) {
     case HidItemSize::ZeroBytePayload:
         return 0;
     case HidItemSize::OneBytePayload:
-        VERIFY_OR_DEBUG_ASSERT(m_pos + 1 <= m_data.size()) {
+        VERIFY_OR_DEBUG_ASSERT(m_pos < m_data.size()) {
             return 0;
         }
         return m_data[m_pos++];
     case HidItemSize::TwoBytePayload:
-        VERIFY_OR_DEBUG_ASSERT(m_pos + 2 <= m_data.size()) {
+        VERIFY_OR_DEBUG_ASSERT(m_data.size() - m_pos >= 2) {
             return 0;
         }
         payload = m_data[m_pos++];
-        payload |= m_data[m_pos++] << 8;
+        payload |= static_cast<uint32_t>(m_data[m_pos++]) << 8;
         return payload;
     case HidItemSize::FourBytePayload:
-        VERIFY_OR_DEBUG_ASSERT(m_pos + 4 <= m_data.size()) {
+        VERIFY_OR_DEBUG_ASSERT(m_data.size() - m_pos >= 4) {
             return 0;
         }
         payload = m_data[m_pos++];
-        payload |= m_data[m_pos++] << 8;
-        payload |= m_data[m_pos++] << 16;
-        payload |= m_data[m_pos++] << 24;
+        payload |= static_cast<uint32_t>(m_data[m_pos++]) << 8;
+        payload |= static_cast<uint32_t>(m_data[m_pos++]) << 16;
+        payload |= static_cast<uint32_t>(m_data[m_pos++]) << 24;
         return payload;
     default:
         DEBUG_ASSERT(true);
@@ -414,6 +432,22 @@ Collection HidReportDescriptor::parse() {
                 pCurrentReport = std::make_unique<Report>(getReportType(tag), globalItems.reportId);
             }
 
+            constexpr std::uint64_t maxReportBitCount =
+                    std::numeric_limits<std::uint16_t>::max() * 8ULL;
+            const std::uint64_t currentReportBitPosition =
+                    pCurrentReport->getLastBytePosition() * 8ULL +
+                    pCurrentReport->getLastBitPosition();
+            const std::uint64_t itemBitCount =
+                    static_cast<std::uint64_t>(globalItems.reportSize) *
+                    globalItems.reportCount;
+            if (currentReportBitPosition > maxReportBitCount ||
+                    itemBitCount > maxReportBitCount - currentReportBitPosition) {
+                return {};
+            }
+            if (globalItems.reportSize == 0 && globalItems.reportCount > 0) {
+                return {};
+            }
+
             int32_t physicalMinimum;
             int32_t physicalMaximum;
             if (globalItems.physicalMinimum == 0 && globalItems.physicalMaximum == 0) {
@@ -429,20 +463,36 @@ Collection HidReportDescriptor::parse() {
 
             if (flags.data_constant == 1) {
                 // Constant value padding - Usually for byte alignment
-                pCurrentReport->increasePosition(globalItems.reportSize * globalItems.reportCount);
+                if (!pCurrentReport->increasePosition(itemBitCount)) {
+                    return {};
+                }
             } else if (flags.array_variable == 0) {
                 // Array (e.g. list of pressed keys of a computer keyboard)
                 // NOT IMPLEMENTED as not relevant for mapping wizard,
                 // but could be implemented by overloaded Control class
-                pCurrentReport->increasePosition(globalItems.reportSize * globalItems.reportCount);
+                if (!pCurrentReport->increasePosition(itemBitCount)) {
+                    return {};
+                }
+            } else if (globalItems.reportSize > 32) {
+                if (!pCurrentReport->increasePosition(itemBitCount)) {
+                    return {};
+                }
             } else {
                 // Normal variable control
                 uint32_t usage = 0;
-                unsigned int numOfControls =
-                        (localItems.UsageMinimum != kNotSet &&
-                                localItems.UsageMaximum != kNotSet)
-                        ? localItems.UsageMaximum - localItems.UsageMinimum + 1
-                        : globalItems.reportCount;
+                unsigned int numOfControls = globalItems.reportCount;
+                if (localItems.UsageMinimum != kNotSet &&
+                        localItems.UsageMaximum != kNotSet) {
+                    if (localItems.UsageMaximum < localItems.UsageMinimum) {
+                        return {};
+                    }
+                    const auto usageRangeCount =
+                            static_cast<std::uint64_t>(localItems.UsageMaximum) -
+                            localItems.UsageMinimum + 1;
+                    numOfControls = static_cast<unsigned int>(std::min<std::uint64_t>(
+                            usageRangeCount,
+                            globalItems.reportCount));
+                }
                 for (unsigned int controlIdx = 0;
                         controlIdx < numOfControls;
                         controlIdx++) {
@@ -471,11 +521,16 @@ Collection HidReportDescriptor::parse() {
                             pCurrentReport->getLastBitPosition(),
                             globalItems.reportSize);
                     pCurrentReport->addControl(control);
-                    pCurrentReport->increasePosition(globalItems.reportSize);
+                    if (!pCurrentReport->increasePosition(globalItems.reportSize)) {
+                        return {};
+                    }
                 }
-                pCurrentReport->increasePosition(
-                        (globalItems.reportCount - numOfControls) *
-                        globalItems.reportSize);
+                const auto remainingBits =
+                        static_cast<std::uint64_t>(globalItems.reportCount - numOfControls) *
+                        globalItems.reportSize;
+                if (!pCurrentReport->increasePosition(remainingBits)) {
+                    return {};
+                }
             }
 
             localItems = LocalItems();

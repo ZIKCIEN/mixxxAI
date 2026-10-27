@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QTextCodec>
 #include <QtDebug>
+#include <limits>
 
 #include "engine/engine.h"
 #include "library/dao/trackschema.h"
@@ -74,7 +75,7 @@ enum class IDForColor : uint8_t {
 };
 
 constexpr mixxx::RgbColor kColorForIDPink(0xF870F8);
-constexpr mixxx::RgbColor kColorForIDRed(0xF870900);
+constexpr mixxx::RgbColor kColorForIDRed(0xF87090);
 constexpr mixxx::RgbColor kColorForIDOrange(0xF8A030);
 constexpr mixxx::RgbColor kColorForIDYellow(0xF8E331);
 constexpr mixxx::RgbColor kColorForIDGreen(0x1EE000);
@@ -268,12 +269,22 @@ inline bool instanceof (const T* ptr) {
 }
 
 QString fromUtf16LeString(const std::string& toConvert) {
+    if (toConvert.size() % 2 != 0 ||
+            toConvert.size() > static_cast<std::size_t>(
+                                       std::numeric_limits<int>::max())) {
+        return {};
+    }
     // Kaitai uses std::string as single container for all string encodings.
     return QTextCodec::codecForName("UTF-16LE")
             ->toUnicode(toConvert.data(), static_cast<int>(toConvert.length()));
 }
 
 QString fromUtf16BeString(const std::string& toConvert) {
+    if (toConvert.size() < 2 || toConvert.size() % 2 != 0 ||
+            toConvert.size() > static_cast<std::size_t>(
+                                       std::numeric_limits<int>::max())) {
+        return {};
+    }
     // Kaitai uses std::string as single container for all string encodings.
     int length = static_cast<int>(toConvert.length()) - 2; // strip off trailing nullbyte
     return QTextCodec::codecForName("UTF-16BE")->toUnicode(toConvert.data(), length);

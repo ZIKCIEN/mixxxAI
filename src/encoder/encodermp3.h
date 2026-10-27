@@ -25,7 +25,7 @@ class EncoderMp3 final : public Encoder {
     void setEncoderSettings(const EncoderSettings& settings) override;
 
   private:
-    void initStream();
+    int initStream();
     int bufferOutGrow(std::size_t bufferSize);
     int bufferInGrow(std::size_t bufferSize);
 
@@ -42,6 +42,7 @@ class EncoderMp3 final : public Encoder {
     std::size_t m_bufferOutSize;
     float* m_bufferIn[2];
     std::size_t m_bufferInSize;
+    bool m_flushed;
 
     EncoderCallback* m_pCallback;
 };

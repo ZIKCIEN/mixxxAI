@@ -6,6 +6,8 @@
 #include <sndfile.h>
 
 #include <QtDebug>
+#include <algorithm>
+#include <limits>
 
 #include "audio/types.h"
 #include "encoder/encodercallback.h"
@@ -27,19 +29,26 @@ static sf_count_t  sf_f_get_filelen (void *user_data)
 // The return value must contain the new offset in the file.
 static sf_count_t  sf_f_seek (sf_count_t offset, int whence, void *user_data)
 {
-    sf_count_t new_offset;
     EncoderCallback* pCallback = static_cast<EncoderCallback*>(user_data);
+    sf_count_t baseOffset = 0;
     if (whence == SEEK_SET) {
-        new_offset = offset;
-        pCallback->seek(static_cast<int>(new_offset));
+        baseOffset = 0;
     } else if (whence == SEEK_CUR) {
-        new_offset = pCallback->tell()+offset;
-        pCallback->seek(static_cast<int>(new_offset));
+        baseOffset = pCallback->tell();
+    } else if (whence == SEEK_END) {
+        baseOffset = pCallback->filelen();
     } else {
-        new_offset =  pCallback->filelen()-offset;
-        pCallback->seek(static_cast<int>(new_offset));
+        return -1;
     }
-    return new_offset;
+
+    if ((whence != SEEK_SET && baseOffset < 0) ||
+            offset > std::numeric_limits<qint64>::max() - baseOffset ||
+            offset < -baseOffset) {
+        return -1;
+    }
+    const sf_count_t newOffset = baseOffset + offset;
+    pCallback->seek(newOffset);
+    return pCallback->tell() == newOffset ? newOffset : -1;
 }
 // The virtual file context must copy ("read") "count" bytes into the buffer
 // provided by ptr and return the count of actually copied bytes.
@@ -56,8 +65,18 @@ static sf_count_t  sf_f_read (void *ptr, sf_count_t count, void *user_data)
 //  with ptr and return the count of actually processed bytes.
 static sf_count_t sf_f_write (const void *ptr, sf_count_t count, void *user_data)
 {
+    if (count < 0 || (count > 0 && !ptr)) {
+        return 0;
+    }
     EncoderCallback* pCallback = static_cast<EncoderCallback*>(user_data);
-    pCallback->write(nullptr, static_cast<const unsigned char*>(ptr), 0, static_cast<int>(count));
+    const auto* data = static_cast<const unsigned char*>(ptr);
+    sf_count_t bytesWritten = 0;
+    while (bytesWritten < count) {
+        const int chunkSize = static_cast<int>(std::min<sf_count_t>(
+                count - bytesWritten, std::numeric_limits<int>::max()));
+        pCallback->write(nullptr, data + bytesWritten, 0, chunkSize);
+        bytesWritten += chunkSize;
+    }
     return count;
 }
 
@@ -103,6 +122,7 @@ void EncoderWave::setEncoderSettings(const EncoderSettings& settings) {
     } else if (format == ENCODING_AIFF) {
         m_sfInfo.format = SF_FORMAT_AIFF;
     } else {
+        m_sfInfo.format = SF_FORMAT_WAV;
         qWarning() << "Unexpected Format when setting EncoderWave: " << format << ". Reverting to wav";
         // Other possibly interesting formats
         // There is a n option for RF64 to automatically downgrade to RIFF WAV if less than 4GB using an
@@ -150,7 +170,13 @@ void EncoderWave::setEncoderSettings(const EncoderSettings& settings) {
 
 // call sendPackages() or write() after 'flush()' as outlined in enginebroadcast.cpp
 void EncoderWave::flush() {
+    if (!m_pSndfile) {
+        return;
+    }
     sf_write_sync(m_pSndfile);
+    if ((m_sfInfo.format & SF_FORMAT_TYPEMASK) != SF_FORMAT_WAV) {
+        return;
+    }
 
     QString trackList = getTrackList().join("\n");
 
@@ -161,11 +187,16 @@ void EncoderWave::flush() {
     tag.setComment(QStringToTString(trackList));
 
     TagLib::ByteVector tagBuffer = tag.render();
+    if (tagBuffer.size() > std::numeric_limits<int>::max()) {
+        qWarning() << "WAV metadata block is too large to write" << tagBuffer.size();
+        return;
+    }
 
     // Write the LIST chunk header.
     QByteArray listChunkHeaderBuffer = QByteArray("LIST");
     listChunkHeaderBuffer.resize(8);
-    qToLittleEndian(tagBuffer.size(), listChunkHeaderBuffer.data() + 4);
+    qToLittleEndian(static_cast<quint32>(tagBuffer.size()),
+            listChunkHeaderBuffer.data() + 4);
 
     m_pCallback->write(nullptr,
             reinterpret_cast<const unsigned char*>(listChunkHeaderBuffer.constData()),
@@ -179,14 +210,18 @@ void EncoderWave::flush() {
             tagBuffer.size());
 
     // Update the file header with the new file size
-    int fileSize = m_pCallback->tell();
-    m_pCallback->seek(4);
-    auto fileSizeBuffer = QByteArray(4, 0);
-    qToLittleEndian(fileSize - 8, listChunkHeaderBuffer.data());
-    m_pCallback->write(nullptr,
-            reinterpret_cast<const unsigned char*>(fileSizeBuffer.constData()),
-            0,
-            4);
+    const qint64 fileSize = m_pCallback->tell();
+    if (fileSize >= 8 &&
+            static_cast<quint64>(fileSize - 8) <=
+                    std::numeric_limits<quint32>::max()) {
+        m_pCallback->seek(4);
+        auto fileSizeBuffer = QByteArray(4, 0);
+        qToLittleEndian(static_cast<quint32>(fileSize - 8), fileSizeBuffer.data());
+        m_pCallback->write(nullptr,
+                reinterpret_cast<const unsigned char*>(fileSizeBuffer.constData()),
+                0,
+                fileSizeBuffer.size());
+    }
 }
 
 void EncoderWave::encodeBuffer(const CSAMPLE* pBuffer, const std::size_t bufferSize) {

@@ -26,11 +26,11 @@ class EngineRecord : public QObject, public EncoderCallback, public SideChainWor
     // writes compressed audio to file
     void write(const unsigned char *header, const unsigned char *body, int headerLen, int bodyLen) override;
     // gets stream position
-    int tell() override;
+    qint64 tell() override;
     // sets stream position
-    void seek(int pos) override;
+    void seek(qint64 pos) override;
     // gets stream length
-    int filelen()  override;
+    qint64 filelen() override;
 
     // creates or opens an audio file
     bool openFile();

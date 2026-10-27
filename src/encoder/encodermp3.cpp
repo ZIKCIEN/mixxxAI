@@ -31,6 +31,7 @@ EncoderMp3::EncoderMp3(EncoderCallback* pCallback)
           m_bufferOutSize(0),
           m_bufferIn{nullptr, nullptr},
           m_bufferInSize(0),
+          m_flushed(false),
           m_pCallback(pCallback) {
 }
 
@@ -87,11 +88,12 @@ int EncoderMp3::bufferOutGrow(std::size_t bufferSize) {
         return 0;
     }
 
-    m_bufferOut = (unsigned char*)realloc(m_bufferOut, bufferSize);
-    if (m_bufferOut == nullptr) {
+    auto* pBufferOut = static_cast<unsigned char*>(realloc(m_bufferOut, bufferSize));
+    if (pBufferOut == nullptr) {
         return -1;
     }
 
+    m_bufferOut = pBufferOut;
     m_bufferOutSize = bufferSize;
     return 0;
 }
@@ -101,11 +103,19 @@ int EncoderMp3::bufferInGrow(std::size_t bufferSize) {
         return 0;
     }
 
-    m_bufferIn[0] = (float*)realloc(m_bufferIn[0], bufferSize * sizeof(float));
-    m_bufferIn[1] = (float*)realloc(m_bufferIn[1], bufferSize * sizeof(float));
-    if ((m_bufferIn[0] == nullptr) || (m_bufferIn[1] == nullptr)) {
+    auto* pBufferInLeft = static_cast<float*>(
+            realloc(m_bufferIn[0], bufferSize * sizeof(float)));
+    if (pBufferInLeft == nullptr) {
         return -1;
     }
+    m_bufferIn[0] = pBufferInLeft;
+
+    auto* pBufferInRight = static_cast<float*>(
+            realloc(m_bufferIn[1], bufferSize * sizeof(float)));
+    if (pBufferInRight == nullptr) {
+        return -1;
+    }
+    m_bufferIn[1] = pBufferInRight;
 
     m_bufferInSize = bufferSize;
     return 0;
@@ -114,7 +124,7 @@ int EncoderMp3::bufferInGrow(std::size_t bufferSize) {
 // Using this method requires to call method 'write()' or 'sendPackages()'
 // depending on which context you use the class (broadcast or recording to HDD)
 void EncoderMp3::flush() {
-    if (m_lameFlags == nullptr) {
+    if (m_lameFlags == nullptr || m_flushed) {
         return;
     }
     // Flush also writes ID3 tags.
@@ -131,9 +141,14 @@ void EncoderMp3::flush() {
     std::size_t numBytes =
             lame_get_lametag_frame(m_lameFlags, m_bufferOut, m_bufferOutSize);
     if (numBytes > m_bufferOutSize) {
-        bufferOutGrow(numBytes);
+        if (bufferOutGrow(numBytes) < 0) {
+            return;
+        }
         numBytes = lame_get_lametag_frame(
                 m_lameFlags, m_bufferOut, m_bufferOutSize);
+        if (numBytes > m_bufferOutSize) {
+            return;
+        }
     }
 
     TagLib::ID3v2::Tag id3Tag;
@@ -183,19 +198,20 @@ void EncoderMp3::flush() {
             m_bufferOut,
             static_cast<int>(id3Buffer.size()),
             static_cast<int>(numBytes));
+    m_flushed = true;
 }
 
 void EncoderMp3::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSize) {
-    if (m_lameFlags == nullptr) {
+    if (m_lameFlags == nullptr || m_flushed) {
         return;
     }
     std::size_t outsize = 0;
     int rc = 0;
 
     outsize = (int)((1.25 * bufferSize + 7200) + 1);
-    bufferOutGrow(outsize);
-
-    bufferInGrow(bufferSize);
+    if (bufferOutGrow(outsize) < 0 || bufferInGrow(bufferSize) < 0) {
+        return;
+    }
 
     // Deinterleave samples. We use normalized floats in the engine [-1.0, 1.0]
     // but LAME expects samples in the range [SHRT_MIN, SHRT_MAX].
@@ -216,12 +232,11 @@ void EncoderMp3::encodeBuffer(const CSAMPLE* samples, const std::size_t bufferSi
     m_pCallback->write(nullptr, m_bufferOut, 0, rc);
 }
 
-void EncoderMp3::initStream() {
-    m_bufferOutSize = (size_t)((1.25 * 20000 + 7200) + 1);
-    m_bufferOut = (unsigned char *)malloc(m_bufferOutSize);
-
-    m_bufferIn[0] = (float *)malloc(m_bufferOutSize * sizeof(float));
-    m_bufferIn[1] = (float *)malloc(m_bufferOutSize * sizeof(float));
+int EncoderMp3::initStream() {
+    const auto bufferSize = static_cast<std::size_t>((1.25 * 20000 + 7200) + 1);
+    if (bufferOutGrow(bufferSize) < 0 || bufferInGrow(bufferSize) < 0) {
+        return -1;
+    }
 
     // Add a static header padding, which will be filled one termination
     QByteArray headerPad(kHeaderPadding, 0);
@@ -229,6 +244,7 @@ void EncoderMp3::initStream() {
             reinterpret_cast<const unsigned char*>(headerPad.constData()),
             0,
             headerPad.size());
+    return 0;
 }
 
 int EncoderMp3::initEncoder(mixxx::audio::SampleRate sampleRate,
@@ -292,10 +308,20 @@ int EncoderMp3::initEncoder(mixxx::audio::SampleRate sampleRate,
     int ret = lame_init_params(m_lameFlags);
     if (ret < 0) {
         qDebug() << "Unable to initialize MP3 parameters. return code:" << ret;
+        lame_close(m_lameFlags);
+        m_lameFlags = nullptr;
         return -1;
     }
 
-    initStream();
+    if (initStream() < 0) {
+        if (pUserErrorMessage) {
+            *pUserErrorMessage = QObject::tr(
+                    "MP3 encoding is not supported. Lame could not be initialized");
+        }
+        lame_close(m_lameFlags);
+        m_lameFlags = nullptr;
+        return -1;
+    }
 
     return 0;
 }

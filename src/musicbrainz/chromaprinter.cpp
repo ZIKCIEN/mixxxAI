@@ -3,6 +3,7 @@
 #include <chromaprint.h>
 
 #include <QtDebug>
+#include <limits>
 #include <vector>
 
 #include "moc_chromaprinter.cpp"
@@ -53,28 +54,42 @@ QString calcFingerprint(
     std::vector<SAMPLE> fingerprintSamples(
             audioSourceProxy.getSignalInfo().frames2samples(
                     readableSampleFrames.frameLength()));
+    if (fingerprintSamples.empty() ||
+            fingerprintSamples.size() > static_cast<std::size_t>(
+                                               std::numeric_limits<int>::max())) {
+        qWarning() << "Audio sample data is empty or too large for fingerprinting";
+        return QString();
+    }
+
     // Convert floating-point to integer
     SampleUtil::convertFloat32ToS16(
-            &fingerprintSamples[0],
+            fingerprintSamples.data(),
             sampleBuffer.data(),
             static_cast<SINT>(fingerprintSamples.size()));
 
     qDebug() << "reading file took" << timerReadingFile.elapsed().debugMillisWithUnit();
 
     ChromaprintContext* ctx = chromaprint_new(CHROMAPRINT_ALGORITHM_DEFAULT);
-    chromaprint_start(
+    if (!ctx) {
+        qWarning() << "Failed to allocate Chromaprint context";
+        return QString();
+    }
+    if (!chromaprint_start(
             ctx,
             audioSourceProxy.getSignalInfo().getSampleRate(),
-            audioSourceProxy.getSignalInfo().getChannelCount());
+            audioSourceProxy.getSignalInfo().getChannelCount())) {
+        qWarning() << "Failed to start Chromaprint context";
+        chromaprint_free(ctx);
+        return QString();
+    }
 
     PerformanceTimer timerGeneratingFingerprint;
     timerGeneratingFingerprint.start();
     const int success = chromaprint_feed(
             ctx,
-            &fingerprintSamples[0],
+            fingerprintSamples.data(),
             static_cast<int>(fingerprintSamples.size()));
-    chromaprint_finish(ctx);
-    if (!success) {
+    if (!success || !chromaprint_finish(ctx)) {
         qWarning() << "Failed to generate fingerprint from sample data";
         chromaprint_free(ctx);
         return QString();
@@ -84,17 +99,22 @@ QString calcFingerprint(
     int size = 0;
     int ret = chromaprint_get_raw_fingerprint(ctx, &fprint, &size);
     QByteArray fingerprint;
-    if (ret == 1) {
-        char_p encoded = nullptr;
+    char_p encoded = nullptr;
+    if (ret == 1 && fprint && size > 0) {
         int encoded_size = 0;
-        chromaprint_encode_fingerprint(fprint, size,
-                                       CHROMAPRINT_ALGORITHM_DEFAULT,
-                                       &encoded,
-                                       &encoded_size, 1);
-
-        fingerprint.append(reinterpret_cast<char*>(encoded), encoded_size);
-
+        if (chromaprint_encode_fingerprint(fprint, size,
+                    CHROMAPRINT_ALGORITHM_DEFAULT,
+                    &encoded,
+                    &encoded_size, 1) && encoded && encoded_size > 0) {
+            fingerprint.append(reinterpret_cast<char*>(encoded), encoded_size);
+        }
+    } else {
+        qWarning() << "Failed to retrieve raw audio fingerprint";
+    }
+    if (fprint) {
         chromaprint_dealloc(fprint);
+    }
+    if (encoded) {
         chromaprint_dealloc(encoded);
     }
     chromaprint_free(ctx);
@@ -112,6 +132,10 @@ ChromaPrinter::ChromaPrinter(QObject* parent)
 }
 
 QString ChromaPrinter::getFingerprint(TrackPointer pTrack) {
+    if (!pTrack) {
+        qWarning() << "Cannot fingerprint an invalid track";
+        return QString();
+    }
     mixxx::AudioSource::OpenParams config;
     // always stereo / 2 channels (see below)
     config.setChannelCount(mixxx::audio::ChannelCount(2));

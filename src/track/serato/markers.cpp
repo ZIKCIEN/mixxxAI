@@ -1,5 +1,6 @@
 #include "track/serato/markers.h"
 
+#include <cstring>
 #include <QtEndian>
 
 #include "track/serato/tags.h"
@@ -206,7 +207,7 @@ SeratoMarkersEntryPointer SeratoMarkersEntry::parseID3(const QByteArray& data) {
     }
 
     // Make sure that the unknown (and probably unused) bytes have the expected value
-    if (strncmp(buffer, "\x00\x7F\x7F\x7F\x7F\x7F", sizeof(buffer)) != 0) {
+    if (std::memcmp(buffer, "\x00\x7F\x7F\x7F\x7F\x7F", sizeof(buffer)) != 0) {
         // This should never happen with Metadata exported from Serato. We fail
         // here because this case is unexpected and should not be corrected
         // silently without knowing what we do. Write a bug if this assumption
@@ -286,7 +287,7 @@ SeratoMarkersEntryPointer SeratoMarkersEntry::parseMP4(const QByteArray& data) {
     const auto color = SeratoStoredHotcueColor(qRgb(colorRed, colorGreen, colorBlue));
 
     // Make sure that the unknown (and probably unused) bytes have the expected value
-    if (strncmp(buffer, "\x00\xFF\xFF\xFF\xFF\x00", sizeof(buffer)) != 0) {
+    if (std::memcmp(buffer, "\x00\xFF\xFF\xFF\xFF\x00", sizeof(buffer)) != 0) {
         // This should never happen with Metadata exported from Serato. We fail
         // here because this case is unexpected and should not be corrected
         // silently without knowing what we do. Write a bug if this assumption

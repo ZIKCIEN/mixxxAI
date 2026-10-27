@@ -306,6 +306,12 @@ CachingReader::ReadResult CachingReader::read(SINT startSample,
         CSAMPLE* buffer,
         mixxx::audio::ChannelCount channelCount) {
     // Check for bad inputs
+    VERIFY_OR_DEBUG_ASSERT(channelCount.isValid()) {
+        kLogger.critical()
+                << "Invalid arguments for read():"
+                << "channelCount =" << channelCount;
+        return ReadResult::UNAVAILABLE;
+    }
     // Refuse to read from an invalid position
     VERIFY_OR_DEBUG_ASSERT(startSample % channelCount == 0) {
         kLogger.critical()

@@ -114,7 +114,7 @@ bool EngineRecord::metaDataHasChanged()
     if (m_pCurrentTrack) {
         if (!pTrack->getId().isValid() || !m_pCurrentTrack->getId().isValid()) {
             if ((pTrack->getArtist() == m_pCurrentTrack->getArtist()) &&
-                (pTrack->getTitle() == m_pCurrentTrack->getArtist())) {
+                (pTrack->getTitle() == m_pCurrentTrack->getTitle())) {
                 return false;
             }
         }
@@ -328,21 +328,21 @@ void EngineRecord::write(const unsigned char *header, const unsigned char *body,
 
 }
 // Encoder calls this method to write compressed audio
-int EngineRecord::tell() {
+qint64 EngineRecord::tell() {
     if (!fileOpen()) {
         return -1;
     }
     return m_dataStream.device()->pos();
 }
 // Encoder calls this method to write compressed audio
-void EngineRecord::seek(int pos) {
+void EngineRecord::seek(qint64 pos) {
     if (!fileOpen()) {
         return;
     }
-    m_dataStream.device()->seek(static_cast<qint64>(pos));
+    m_dataStream.device()->seek(pos);
 }
 // These are not used for streaming, but the interface requires them
-int EngineRecord::filelen() {
+qint64 EngineRecord::filelen() {
     if (!fileOpen()) {
         return 0;
     }

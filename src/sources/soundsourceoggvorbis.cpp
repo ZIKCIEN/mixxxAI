@@ -1,5 +1,8 @@
 #include "sources/soundsourceoggvorbis.h"
 
+#include <algorithm>
+#include <limits>
+
 #include <QFile>
 
 #include "util/logger.h"
@@ -219,28 +222,50 @@ size_t SoundSourceOggVorbis::ReadCallback(void* ptr, size_t size, size_t nmemb, 
         return 0;
     }
 
-    nmemb = math_min<size_t>((pFile->size() - pFile->pos()) / size, nmemb);
-    pFile->read((char*)ptr, nmemb * size);
-    return nmemb;
+    const qint64 fileSize = pFile->size();
+    const qint64 position = pFile->pos();
+    if (fileSize < 0 || position < 0 || position >= fileSize) {
+        return 0;
+    }
+
+    const auto availableItems = static_cast<size_t>((fileSize - position) / size);
+    const size_t itemCount = std::min(availableItems, nmemb);
+    if (itemCount == 0) {
+        return 0;
+    }
+
+    const qint64 bytesToRead = static_cast<qint64>(itemCount * size);
+    const qint64 bytesRead = pFile->read(static_cast<char*>(ptr), bytesToRead);
+    return bytesRead > 0 ? static_cast<size_t>(bytesRead / size) : 0;
 }
 
 //static
 int SoundSourceOggVorbis::SeekCallback(void* datasource, ogg_int64_t offset, int whence) {
     QFile* pFile = static_cast<QFile*>(datasource);
     if (!pFile) {
-        return 0;
+        return -1;
     }
 
+    qint64 baseOffset = 0;
     switch (whence) {
     case SEEK_SET:
-        return pFile->seek(offset) ? 0 : -1;
+        break;
     case SEEK_CUR:
-        return pFile->seek(pFile->pos() + offset) ? 0 : -1;
+        baseOffset = pFile->pos();
+        break;
     case SEEK_END:
-        return pFile->seek(pFile->size() + offset) ? 0 : -1;
+        baseOffset = pFile->size();
+        break;
     default:
         return -1;
     }
+
+    if ((whence != SEEK_SET && baseOffset < 0) ||
+            offset > std::numeric_limits<qint64>::max() - baseOffset ||
+            offset < -baseOffset) {
+        return -1;
+    }
+    return pFile->seek(baseOffset + offset) ? 0 : -1;
 }
 
 //static

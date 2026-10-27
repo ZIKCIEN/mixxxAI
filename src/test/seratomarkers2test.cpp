@@ -461,6 +461,24 @@ TEST_F(SeratoMarkers2Test, ParseEmptyDataMP4) {
     parseEmptyMarkers2Data(mixxx::taglib::FileType::MP4);
 }
 
+TEST_F(SeratoMarkers2Test, RejectsTruncatedEntrySize) {
+    const QByteArray innerData("\x01\x01CUE\x00\x00\x00", 8);
+    mixxx::SeratoMarkers2 markers;
+    EXPECT_FALSE(mixxx::SeratoMarkers2::parse(
+            &markers,
+            innerData.toBase64(),
+            mixxx::taglib::FileType::OggVorbis));
+}
+
+TEST_F(SeratoMarkers2Test, RejectsTruncatedEntryPayload) {
+    QByteArray innerData("\x01\x01CUE\x00\x00\x00\x00\x02x", 11);
+    mixxx::SeratoMarkers2 markers;
+    EXPECT_FALSE(mixxx::SeratoMarkers2::parse(
+            &markers,
+            innerData.toBase64(),
+            mixxx::taglib::FileType::OggVorbis));
+}
+
 TEST_F(SeratoMarkers2Test, ParseAndDumpBase64EncodedXiph) {
     // No cue points from a FLAC file
     constexpr char referenceData[] =

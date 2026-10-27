@@ -93,6 +93,18 @@ const QString kSeratoPlaylistsTable = QStringLiteral("serato_playlists");
 const QString kSeratoPlaylistTracksTable = QStringLiteral("serato_playlist_tracks");
 
 constexpr int kHeaderSize = 2 * sizeof(quint32);
+constexpr quint32 kMaxSeratoFieldSize = 16 * 1024 * 1024;
+
+QByteArray readFieldData(QIODevice* reader, quint32 fieldSize) {
+    const qint64 position = reader->pos();
+    const qint64 fileSize = reader->size();
+    if (fieldSize > kMaxSeratoFieldSize || position < 0 || fileSize < position ||
+            static_cast<quint64>(fieldSize) >
+                    static_cast<quint64>(fileSize - position)) {
+        return {};
+    }
+    return reader->read(fieldSize);
+}
 
 int createPlaylist(const QSqlDatabase& database, const QString& name, const QString& databasePath) {
     QSqlQuery query(database);
@@ -152,7 +164,7 @@ inline bool parseTrack(serato_track_t* track, QIODevice* buffer) {
         quint32 fieldSize = bytesToUInt32(headerData.mid(sizeof(quint32), kHeaderSize));
 
         // Read field data
-        QByteArray data = buffer->read(fieldSize);
+        QByteArray data = readFieldData(buffer, fieldSize);
         if (static_cast<quint32>(data.length()) != fieldSize) {
             QString fieldName = QString(headerData.mid(0, sizeof(quint32)));
             qWarning() << "Failed to read "
@@ -290,7 +302,7 @@ inline QString parseCrateTrackPath(QIODevice* buffer) {
         quint32 fieldSize = bytesToUInt32(headerData.mid(sizeof(quint32), kHeaderSize));
 
         // Read field data
-        QByteArray data = buffer->read(fieldSize);
+        QByteArray data = readFieldData(buffer, fieldSize);
         if (static_cast<quint32>(data.length()) != fieldSize) {
             QString fieldName = QString(headerData.mid(0, sizeof(quint32)));
             qWarning() << "Failed to read "
@@ -370,7 +382,7 @@ QString parseCrate(
         quint32 fieldSize = bytesToUInt32(headerData.mid(sizeof(quint32), kHeaderSize));
 
         // Read field data
-        QByteArray data = crateFile.read(fieldSize);
+        QByteArray data = readFieldData(&crateFile, fieldSize);
         if (static_cast<quint32>(data.length()) != fieldSize) {
             QString fieldName = QString(headerData.mid(0, sizeof(quint32)));
             qWarning() << "Failed to read "
@@ -397,8 +409,11 @@ QString parseCrate(
             QString location = parseCrateTrackPath(&buffer);
             if (!location.isEmpty()) {
                 int trackId = trackIdMap.value(location, -1);
-                insertTrackIntoPlaylist(database, playlistId, trackId, trackCount);
-                trackCount++;
+                if (trackId >= 0 &&
+                        insertTrackIntoPlaylist(
+                                database, playlistId, trackId, trackCount) >= 0) {
+                    trackCount++;
+                }
                 break;
             }
             break;
@@ -553,7 +568,7 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
         quint32 fieldSize = bytesToUInt32(headerData.mid(sizeof(quint32), kHeaderSize));
 
         // Read field data
-        QByteArray data = databaseFile.read(fieldSize);
+        QByteArray data = readFieldData(&databaseFile, fieldSize);
         if (static_cast<quint32>(data.length()) != fieldSize) {
             QString fieldName = QString(headerData.mid(0, sizeof(quint32)));
             qWarning() << "Failed to read "
@@ -602,9 +617,11 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
                     LOG_FAILED_QUERY(query);
                 } else {
                     int trackId = query.lastInsertId().toInt();
-                    insertTrackIntoPlaylist(database, playlistId, trackId, trackCount);
                     trackIdMap.insert(track.location, trackId);
-                    trackCount++;
+                    if (insertTrackIntoPlaylist(
+                                database, playlistId, trackId, trackCount) >= 0) {
+                        trackCount++;
+                    }
                 }
                 break;
             }

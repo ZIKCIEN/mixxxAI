@@ -702,19 +702,19 @@ void ShoutConnection::write(const unsigned char* header, const unsigned char* bo
     }
 }
 // These are not used for streaming, but the interface requires them
-int ShoutConnection::tell() {
+qint64 ShoutConnection::tell() {
     if (!m_pShout) {
         return -1;
     }
     return -1;
 }
 // These are not used for streaming, but the interface requires them
-void ShoutConnection::seek(int pos) {
+void ShoutConnection::seek(qint64 pos) {
     Q_UNUSED(pos)
     return;
 }
 // These are not used for streaming, but the interface requires them
-int ShoutConnection::filelen() {
+qint64 ShoutConnection::filelen() {
     return 0;
 }
 
@@ -795,7 +795,7 @@ bool ShoutConnection::metaDataHasChanged() {
     if (m_pMetaData) {
         if (!pTrack->getId().isValid() || !m_pMetaData->getId().isValid()) {
             if ((pTrack->getArtist() == m_pMetaData->getArtist()) &&
-                (pTrack->getTitle() == m_pMetaData->getArtist())) {
+                (pTrack->getTitle() == m_pMetaData->getTitle())) {
                 return false;
             }
         } else if (pTrack->getId() == m_pMetaData->getId()) {

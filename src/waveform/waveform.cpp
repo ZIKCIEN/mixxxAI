@@ -2,6 +2,8 @@
 
 #include <QtDebug>
 
+#include <limits>
+
 #include "analyzer/constants.h"
 #include "engine/engine.h"
 #include "proto/waveform.pb.h"
@@ -147,12 +149,20 @@ QByteArray Waveform::toByteArray() const {
              << "audioVisualRatio" << waveform.audio_visual_ratio();
 
     std::string output;
-    waveform.SerializeToString(&output);
+    if (!waveform.SerializeToString(&output) ||
+            output.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
     return QByteArray(output.data(), static_cast<int>(output.length()));
 }
 
 void Waveform::readByteArray(const QByteArray& data) {
     if (data.isNull()) {
+        return;
+    }
+
+    if (data.size() > std::numeric_limits<int>::max()) {
+        qWarning() << "ERROR: Waveform byte array is too large to parse" << data.size();
         return;
     }
 

@@ -9,6 +9,7 @@
 #include <QString>
 #include <QtEndian>
 #include <QtGlobal>
+#include <limits>
 
 #include "util/logger.h"
 
@@ -38,24 +39,46 @@ struct MP4BoxHeader {
 
 constexpr uint32_t kAtomHeaderSize = sizeof(MP4BoxHeader);
 
-/// @brief Deserialise a MP4 atom/box header
-/// @param reader the reader to read the box from
-/// @param box the box in which to deserialise the data
-/// @return the effective box size
-quint64 operator>>(QIODevice* reader, MP4BoxHeader& box) {
-    reader->read((char*)&box.size, sizeof(box.size));
-    // The size is in big endian
-    box.size = qFromBigEndian(box.size);
-    reader->read(box.type, sizeof(box.type));
-    if (box.size == 1) {
-        // If the box/atom has a size of 1, it is an extended box, and the true
-        // size is in the next 64bits integer big endian
-        quint64 extendedSize;
-        reader->read((char*)&extendedSize, sizeof(extendedSize));
-        box.size = qFromBigEndian(box.size);
-        return extendedSize - kAtomHeaderSize - sizeof(extendedSize);
+bool readExact(QIODevice* reader, char* data, qint64 size) {
+    qint64 bytesRead = 0;
+    while (bytesRead < size) {
+        const qint64 result = reader->read(data + bytesRead, size - bytesRead);
+        if (result <= 0) {
+            return false;
+        }
+        bytesRead += result;
     }
-    return box.size - kAtomHeaderSize;
+    return true;
+}
+
+bool readBoxHeader(QIODevice* reader, MP4BoxHeader* box, quint64* payloadSize,
+        quint64 remainingSize) {
+    quint32 size = 0;
+    if (!readExact(reader, reinterpret_cast<char*>(&size), sizeof(size)) ||
+            !readExact(reader, box->type, sizeof(box->type))) {
+        return false;
+    }
+    size = qFromBigEndian(size);
+    quint64 headerSize = kAtomHeaderSize;
+    quint64 totalSize = size;
+    if (size == 1) {
+        if (remainingSize < kAtomHeaderSize + sizeof(quint64)) {
+            return false;
+        }
+        quint64 extendedSize = 0;
+        if (!readExact(reader, reinterpret_cast<char*>(&extendedSize), sizeof(extendedSize))) {
+            return false;
+        }
+        totalSize = qFromBigEndian(extendedSize);
+        headerSize += sizeof(extendedSize);
+    } else if (size == 0) {
+        totalSize = remainingSize;
+    }
+    if (totalSize < headerSize || totalSize > remainingSize) {
+        return false;
+    }
+    *payloadSize = totalSize - headerSize;
+    return true;
 }
 
 const QStringList kStemManifestAtomPath = {
@@ -72,26 +95,41 @@ const QStringList kStemManifestAtomPath = {
 /// search in
 /// @param pathIdx The level of the tree currently search (index of path)
 /// @return the size of the box data if found, -1 otherwise
-uint32_t seekTillAtom(QIODevice* reader,
+qint64 seekTillAtom(QIODevice* reader,
         const QStringList& path,
-        uint32_t boxSize = 0,
-        uint32_t pathIdx = 0) {
-    if (static_cast<uint32_t>(path.size()) == pathIdx) {
-        return boxSize;
+        qint64 boxSize = -1,
+        qsizetype pathIdx = 0) {
+    if (pathIdx == path.size()) {
+        return static_cast<qint64>(boxSize);
     }
-
-    uint32_t byteRead = 0;
-    MP4BoxHeader box;
-    quint64 effectiveAtomSize;
-    while (!reader->atEnd() && (!boxSize || byteRead < boxSize)) {
-        effectiveAtomSize = reader >> box;
-        byteRead += effectiveAtomSize;
-        if (QString::fromUtf8(box.type, 4) == path[pathIdx]) {
-            return seekTillAtom(reader, path, effectiveAtomSize, pathIdx + 1);
+    if (boxSize < 0) {
+        const qint64 fileSize = reader->size();
+        const qint64 position = reader->pos();
+        if (fileSize < 0 || position < 0 || position > fileSize) {
+            return -1;
         }
-        reader->skip(effectiveAtomSize);
+        boxSize = fileSize - position;
     }
-    return 0;
+    quint64 remainingSize = static_cast<quint64>(boxSize);
+    while (remainingSize >= kAtomHeaderSize) {
+        MP4BoxHeader box{};
+        quint64 payloadSize = 0;
+        const qint64 headerStart = reader->pos();
+        if (headerStart < 0 || !readBoxHeader(reader, &box, &payloadSize, remainingSize)) {
+            return -1;
+        }
+        const quint64 headerSize = static_cast<quint64>(reader->pos() - headerStart);
+        remainingSize -= headerSize + payloadSize;
+        if (QString::fromUtf8(box.type, sizeof(box.type)) == path[pathIdx]) {
+            return seekTillAtom(reader, path, payloadSize, pathIdx + 1);
+        }
+        if (payloadSize > static_cast<quint64>(std::numeric_limits<qint64>::max()) ||
+                reader->skip(static_cast<qint64>(payloadSize)) !=
+                        static_cast<qint64>(payloadSize)) {
+            return -1;
+        }
+    }
+    return -1;
 }
 
 } // anonymous namespace
@@ -105,7 +143,7 @@ bool StemInfoImporter::hasStemAtom(const QString& filePath) {
                 << filePath;
         return false;
     }
-    return seekTillAtom(&file, kStemManifestAtomPath) != 0;
+    return seekTillAtom(&file, kStemManifestAtomPath) > 0;
 }
 
 // static
@@ -138,8 +176,9 @@ QList<StemInfo> StemInfoImporter::importStemInfos(
         return {};
     }
 
-    uint32_t manifestSize;
-    if (!(manifestSize = seekTillAtom(&file, kStemManifestAtomPath))) {
+    const qint64 manifestSize = seekTillAtom(&file, kStemManifestAtomPath);
+    constexpr qint64 kMaxManifestSize = 1024 * 1024;
+    if (manifestSize <= 0 || manifestSize > kMaxManifestSize) {
         kLogger.debug()
                 << "No stem manifest found in the file"
                 << filePath;
@@ -147,6 +186,10 @@ QList<StemInfo> StemInfoImporter::importStemInfos(
     }
 
     QByteArray manifest = file.read(manifestSize);
+    if (manifest.size() != manifestSize) {
+        kLogger.warning() << "Incomplete stem manifest in file" << filePath;
+        return {};
+    }
     // Though most MP4 atoms are usually not null-terminated, it looks like the
     // STEM sometime is, resulting in extra null character(s) preventing JSON
     // deserialization
@@ -179,6 +222,11 @@ QList<StemInfo> StemInfoImporter::importStemInfos(
         return {};
     }
     const auto stemArray = stems.toArray();
+    constexpr qsizetype kMaxStemCount = 4;
+    if (stemArray.size() > kMaxStemCount) {
+        kLogger.warning() << "Too many stems in STEM manifest" << filePath;
+        return {};
+    }
     QList<StemInfo> stemsList;
     stemsList.reserve(stemArray.size());
     int stemIdx = 0;

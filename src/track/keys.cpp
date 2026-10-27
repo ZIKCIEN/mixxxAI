@@ -1,5 +1,7 @@
 #include <QtDebug>
 
+#include <limits>
+
 #include "track/keys.h"
 
 using mixxx::track::io::key::ChromaticKey;
@@ -17,7 +19,10 @@ Keys::Keys(const KeyMap& keyMap)
 
 QByteArray Keys::toByteArray() const {
     std::string output;
-    m_keyMap.SerializeToString(&output);
+    if (!m_keyMap.SerializeToString(&output) ||
+            output.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
     return QByteArray(output.data(), static_cast<int>(output.length()));
 }
 
@@ -47,6 +52,10 @@ void Keys::setGlobalTuningFrequencyHz(double tuningFrequencyHz) {
 }
 
 bool Keys::readByteArray(const QByteArray& byteArray) {
+    if (byteArray.size() > std::numeric_limits<int>::max()) {
+        qWarning() << "ERROR: Keys byte array is too large to parse" << byteArray.size();
+        return false;
+    }
     if (!m_keyMap.ParseFromArray(byteArray.constData(), byteArray.size())) {
         qDebug() << "ERROR: Could not parse Keys from QByteArray of size"
                  << byteArray.size();

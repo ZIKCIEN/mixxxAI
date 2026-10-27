@@ -411,9 +411,14 @@ bool SeratoMarkers2::parseCommon(
 
     QList<std::shared_ptr<SeratoMarkers2Entry>> entries;
 
-    int offset = 2;
-    int entryTypeEndPos;
-    while ((entryTypeEndPos = data.indexOf('\x00', offset)) >= 0) {
+    qsizetype offset = 2;
+    bool foundTerminator = false;
+    while (offset < data.size()) {
+        const qsizetype entryTypeEndPos = data.indexOf('\x00', offset);
+        if (entryTypeEndPos < 0) {
+            kLogger.warning() << "Parsing SeratoMarkers2 failed: unterminated entry type";
+            return false;
+        }
         // Entry Name
         QString entryType(data.mid(offset, entryTypeEndPos - offset));
         offset = entryTypeEndPos + 1;
@@ -425,14 +430,24 @@ bool SeratoMarkers2::parseCommon(
                                   << "Trailing content" << data.mid(offset);
                 return false;
             }
+            foundTerminator = true;
             break;
         }
 
         // Entry Size
-        auto entrySize = qFromBigEndian<quint32>(data.mid(offset, 4));
+        if (data.size() - offset < static_cast<qsizetype>(sizeof(quint32))) {
+            kLogger.warning() << "Parsing SeratoMarkers2 failed: truncated entry size";
+            return false;
+        }
+        const quint32 entrySize = qFromBigEndian<quint32>(data.constData() + offset);
         offset += 4;
+        if (static_cast<quint64>(entrySize) >
+                static_cast<quint64>(data.size() - offset)) {
+            kLogger.warning() << "Parsing SeratoMarkers2 failed: truncated entry data";
+            return false;
+        }
 
-        QByteArray entryData = data.mid(offset, entrySize);
+        QByteArray entryData = data.mid(offset, static_cast<qsizetype>(entrySize));
         offset += entrySize;
 
         // Entry Content
@@ -458,6 +473,10 @@ bool SeratoMarkers2::parseCommon(
             return false;
         }
         entries.append(pEntry);
+    }
+    if (!foundTerminator) {
+        kLogger.warning() << "Parsing SeratoMarkers2 failed: missing end marker";
+        return false;
     }
 
     seratoMarkers2->setAllocatedSize(outerData.size());
