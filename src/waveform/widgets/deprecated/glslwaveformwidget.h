@@ -1,6 +1,6 @@
 #pragma once
 
-#include "waveform/widgets/deprecated/glwaveformwidgetabstract.h"
+#include "waveform/widgets/glwaveformwidgetabstract.h"
 
 class GLSLWaveformWidget : public GLWaveformWidgetAbstract {
     Q_OBJECT

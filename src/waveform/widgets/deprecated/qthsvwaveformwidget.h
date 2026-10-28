@@ -1,6 +1,6 @@
 #pragma once
 
-#include "glwaveformwidgetabstract.h"
+#include "waveform/widgets/glwaveformwidgetabstract.h"
 
 class QtHSVWaveformWidget : public GLWaveformWidgetAbstract {
     Q_OBJECT

@@ -1,4 +1,4 @@
-#include "waveform/widgets/qthsvwaveformwidget.h"
+#include "waveform/widgets/deprecated/qthsvwaveformwidget.h"
 
 #include <QPainter>
 #include <QtDebug>

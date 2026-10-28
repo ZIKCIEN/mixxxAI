@@ -1,4 +1,4 @@
-#include "waveform/widgets/qtvsynctestwidget.h"
+#include "waveform/widgets/deprecated/qtvsynctestwidget.h"
 
 #include <QPainter>
 #include <QtDebug>

@@ -5,7 +5,7 @@
 #include "moc_glslwaveformwidget.cpp"
 #include "util/performancetimer.h"
 #include "waveform/renderers/deprecated/glslwaveformrenderersignal.h"
-#include "waveform/renderers/deprecated/glwaveformrenderbackground.h"
+#include "waveform/renderers/glwaveformrenderbackground.h"
 #include "waveform/renderers/waveformrenderbeat.h"
 #include "waveform/renderers/waveformrendererendoftrack.h"
 #include "waveform/renderers/waveformrendererpreroll.h"
