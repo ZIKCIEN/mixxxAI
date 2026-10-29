@@ -14,7 +14,7 @@
 6. **Rotation** : vérifier 1→position 2, 2→position 3, 3→position 1.
 7. **Annuler** : après permutation ou rotation, revenir aux trois géométries précédentes.
 8. **Persistance** : redémarrer Mixxx et vérifier les géométries.
-9. **Écran débranché** : vérifier que `Récupérer` rend les fenêtres accessibles sur le bureau restant.
+9. **Écran débranché** : débrancher un écran et vérifier que les fenêtres secondaires reviennent seules près de la fenêtre principale (~1 s) ; vérifier aussi `Récupérer` en manuel, et un démarrage avec un écran en moins que lors de la dernière session.
 10. **Audio temps réel** : lecture en cours pendant plusieurs permutations ; vérifier absence de décrochage audio.
 11. **Contrôleurs** : tester souris, écran tactile, clavier et MIDI.
 

@@ -156,6 +156,48 @@ Item {
         saveLayout();
     }
 
+    // A window is reachable if enough of it overlaps at least one screen
+    // for the user to grab its title bar.
+    function isReachable(win) {
+        var screens = Qt.application.screens;
+        var margin = 100;
+        for (var i = 0; i < screens.length; ++i) {
+            var g = screens[i].geometry;
+            if (win.x + win.width - margin > g.x
+                    && win.x + margin < g.x + g.width
+                    && win.y + win.height - margin > g.y
+                    && win.y + margin < g.y + g.height) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Automatic recovery after a monitor is unplugged (or when the saved
+    // layout refers to a monitor that is no longer there). The main window
+    // is the anchor: if it is not reachable itself, the window system is
+    // expected to have moved it already, so nothing is done.
+    function recoverIfStranded() {
+        if (!mainWindow || !libraryWindow || !toolsWindow)
+            return;
+        if (!isReachable(mainWindow))
+            return;
+        if (!isReachable(libraryWindow) || !isReachable(toolsWindow))
+            resetNearMainWindow();
+    }
+
+    // Screen changes arrive in bursts; wait for the layout to settle.
+    Timer {
+        id: recoverTimer
+        interval: 750
+        onTriggered: root.recoverIfStranded()
+    }
+
+    Connections {
+        target: Qt.application
+        function onScreensChanged() { recoverTimer.restart(); }
+    }
+
     Connections {
         target: root.mainWindow
         function onXChanged() { root.onGeometryChanged(); }
@@ -185,5 +227,6 @@ Item {
             restoring = false;
             saveLayout();
         }
+        recoverTimer.start();
     }
 }

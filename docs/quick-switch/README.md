@@ -36,7 +36,8 @@ Les commandes de permutation passent les fenêtres visibles en mode fenêtré, c
 
 - **Ce n'est pas encore une intégration testée en compilation** : l'environnement de travail ne contient pas les outils Qt/QML nécessaires pour compiler ou exécuter Mixxx.
 - Les permutations échangent les positions et dimensions des fenêtres. Elles ne choisissent pas un `QScreen` par identifiant natif ; il faut d'abord placer manuellement les fenêtres sur les moniteurs voulus.
-- Le bouton de récupération est manuel. La détection automatique de débranchement/rebranchement d'un écran reste à ajouter.
+- La récupération est automatique au démarrage et lors d'un changement d'écrans (délai de 750 ms) : si une fenêtre secondaire n'est plus atteignable, elle est replacée près de la fenêtre principale. Le bouton `Récupérer` reste disponible en manuel. Cette détection n'a pas été testée sur matériel.
+- `Qt.labs.settings` est conservé volontairement : le QML du dépôt vise Qt 6.4+, alors que `Settings` de `QtCore` demande Qt 6.5.
 - Les effets/auxiliaires sont instanciés dans la troisième fenêtre ; les routages microphone/son avancés ne sont pas encore exposés ici.
 - Les dimensions minimales des fenêtres peuvent limiter l'exactitude d'un échange si l'utilisateur redimensionne une fenêtre sous les minima des autres.
 - Le QML du dépôt peut évoluer ; cette modification est basée sur les fichiers de l'archive fournie.
