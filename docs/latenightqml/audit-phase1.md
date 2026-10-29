@@ -77,3 +77,54 @@ détermine `requiredPaneHeight` et peut casser les animations de bascule
    où (réglages Mixxx ou contrôles `[Skin]`) ?
 3. Écran tactile : taille cible des poignées et des boutons (actuellement
    poignée de 9 px de haut, zone de saisie de 12 px).
+
+## Plan de migration de la bibliothèque (section pilote)
+
+Rien de ce qui suit n'est implémenté. Ce plan découle de la lecture de
+`MainWindow.qml` ; il doit être validé en exécutant le skin.
+
+### Pourquoi ce n'est pas un simple déplacement
+
+La bascule « grande bibliothèque » (`maximizeLibrary`) est une chorégraphie
+coordonnée :
+- `onMaximizeLibraryChanged` active `bigLibraryTransition`, coupe les
+  minuteries, puis démarre `bigLibraryReadinessTimer` (16 ms) qui appelle
+  `finishBigLibraryTransitionWhenReady()`.
+- Cette fonction attend `bigLibraryContentReady` (decks prêts, **et
+  `library.status === Loader.Ready`**) et `bigLibraryAnimationsReady` (une
+  quinzaine d'animations à l'arrêt, **dont `libraryAnchorAnimation`**).
+- En mode grande bibliothèque, `library` change d'ancrage
+  (`AnchorChanges`) vers `parent.top`, `deck1.bottom` ou `deck4.bottom` : ces
+  ancrages ne sont valables que si `library` est dans `deckPane`, comme les
+  decks.
+
+Sortir `library` de `deckPane` casse donc ces ancrages et deux conditions de
+`finishBigLibraryTransitionWhenReady()`.
+
+### Étapes proposées (une validation à chaque étape)
+
+1. **Référence** : lancer `tools/latenightqml_test.sh` sur la branche non
+   modifiée ; noter les résultats et faire des captures (mode normal et grande
+   bibliothèque, 2 et 4 decks).
+2. **Troisième volet sans changer les ancrages** : ajouter un `Item` `libraryPane`
+   comme troisième enfant de `splitView`, y déplacer le `Loader` `library`, en
+   remplaçant les trois `AnchorChanges` par une hauteur/position pilotée par le
+   `SplitView` ; garder `libraryAnchorAnimation` (ou son équivalent) dans
+   `bigLibraryAnimationsReady`.
+3. **Hauteurs de `deckPane`** : `requiredPaneHeight` ne doit plus inclure la
+   bibliothèque ; `SplitView.fillHeight` passe à `libraryPane`, et `deckPane`
+   reçoit `maximumHeight = requiredPaneHeight` en permanence.
+4. **Grande bibliothèque** : réexprimer le mode maximisé comme un état des
+   volets (formes d'onde et decks réduits, bibliothèque étendue) plutôt que
+   comme des ancrages.
+5. **Vérifications** : mêmes tests et mêmes captures qu'à l'étape 1, plus le
+   glisser-déposer de morceaux de la bibliothèque vers un deck
+   (`PlayerDropArea`) et la recherche au clavier.
+
+### Critères de sortie de l'étape pilote
+
+- `tools/latenightqml_test.sh` : mêmes résultats qu'à la référence.
+- La poignée entre decks et bibliothèque se déplace à la souris sans masquer de
+  commande ni déformer les formes d'onde.
+- La bascule grande bibliothèque aller-retour revient exactement à l'état
+  initial (hauteurs et visibilité des decks).
