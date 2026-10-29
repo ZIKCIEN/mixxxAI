@@ -235,6 +235,23 @@ case "$rc" in
     *) log "SORTIE ANORMALE : code $rc (plantage probable avant ${RUN_SECONDS}s)." ;;
 esac
 
+# --- Pile d'appels en cas de plantage ---------------------------------------
+if [ "$rc" != 124 ] && [ "$rc" != 0 ]; then
+    section "Pile d'appels du plantage (gdb)"
+    if command -v gdb > /dev/null 2>&1; then
+        log "relance sous gdb pour obtenir la pile d'appels (jusqu'a $((RUN_SECONDS + 20))s)..."
+        timeout -s TERM -k 5 "$((RUN_SECONDS + 20))" gdb -batch -ex run -ex "bt 30" \
+            --args "$BIN" --new-ui --settings-path "$PROFILE" --log-level debug > "$BUILD/gdb.log" 2>&1
+        if grep -q -E "SIGSEGV|SIGABRT|SIGBUS|SIGFPE" "$BUILD/gdb.log"; then
+            grep -E "SIGSEGV|SIGABRT|SIGBUS|SIGFPE|^#[0-9]+ " "$BUILD/gdb.log" | head -n 40 | tee -a "$REPORT"
+        else
+            log "gdb n'a pas reproduit le plantage (derniere ligne : $(tail -n 1 "$BUILD/gdb.log"))."
+        fi
+    else
+        log "gdb absent : installe-le avec  sudo apt install gdb  puis relance le script."
+    fi
+fi
+
 # --- Analyse des journaux ----------------------------------------------------
 section "Erreurs QML et lignes Quick Switch"
 PATTERN='QuickSwitch|MainWindow\.qml|AuxiliaryPanel\.qml|is not installed|ReferenceError|TypeError|Cannot assign|Unable to assign|Cannot read property|is not defined|Binding loop|module .* not found|QQmlApplicationEngine failed'
