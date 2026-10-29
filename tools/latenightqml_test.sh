@@ -103,6 +103,19 @@ if [ "$DO_BUILD" = 1 ]; then
         grep -n -m5 -B3 -A8 -E "$ERR_PATTERN" "$BUILD/build-test.log" | tee -a "$REPORT"
         log "--- 25 dernieres lignes ---"
         tail -n 25 "$BUILD/build-test.log" | tee -a "$REPORT"
+        if grep -q -E 'ld terminated with signal 9|signal terminated|Killed|out of memory' "$BUILD/build-test.log"; then
+            log ""
+            log "CAUSE PROBABLE : manque de memoire pendant l'edition de liens (processus tue, signal 9)."
+            log "Ce n'est pas une erreur de code. Verifie puis corrige :"
+            log "  free -h ; swapon --show"
+            log "  sudo dmesg | grep -i -E 'out of memory|killed process' | tail -5"
+            log "Solutions, de la plus simple a la plus lourde :"
+            log "  1. Ferme le navigateur et les gros programmes, puis relance ce script."
+            log "  2. Ajoute du swap temporaire (jusqu'au redemarrage) :"
+            log "       sudo fallocate -l 8G /swapfile2 && sudo chmod 600 /swapfile2 && sudo mkswap /swapfile2 && sudo swapon /swapfile2"
+            log "  3. Recompile en Release (binaires bien plus legers a lier ; recompilation complete) :"
+            log "       rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release"
+        fi
         finish
         exit 1
     fi
