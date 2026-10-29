@@ -48,8 +48,18 @@ Item {
             visible = false
         }
 
-        Skin.Library {
+        // Created only while the window is shown, so that there is never a
+        // second hidden Library instance next to the one in the main window.
+        Loader {
+            id: detachedLibrary
+
+            active: libraryWindow.visible
             anchors.fill: parent
+
+            sourceComponent: Component {
+                Skin.Library {
+                }
+            }
         }
     }
 
@@ -72,8 +82,15 @@ Item {
             visible = false
         }
 
-        Skin.AuxiliaryPanel {
+        // Loaded on demand: the effect units are only instantiated while shown.
+        Loader {
+            active: toolsWindow.visible
             anchors.fill: parent
+
+            sourceComponent: Component {
+                Skin.AuxiliaryPanel {
+                }
+            }
         }
     }
 
@@ -113,7 +130,11 @@ Item {
         numberOfDecks: root.show4decks ? root.numDecks : 2
 
         onFocusLibrarySearchRequested: {
-            if (library.item) {
+            if (root.libraryDetached && detachedLibrary.item) {
+                libraryWindow.raise();
+                libraryWindow.requestActivate();
+                detachedLibrary.item.focusSearch();
+            } else if (library.item) {
                 library.item.focusSearch();
             }
         }
