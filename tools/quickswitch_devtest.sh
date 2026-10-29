@@ -179,18 +179,38 @@ if [ "$DO_BUILD" = 1 ]; then
     cmake --build "$BUILD" --parallel "$(nproc)" > "$BUILD/build.log" 2>&1
     rc=$?
     if [ "$rc" -ne 0 ]; then
-        log "ECHEC de la compilation (code $rc). Relance en serie pour isoler la premiere erreur..."
-        cmake --build "$BUILD" --parallel 1 > "$BUILD/build-serial.log" 2>&1
-        # Motif strict : "error:" avec deux-points, pas le mot dans un nom de fichier
-        # (ex. errordialoghandler.cpp).
-        ERR_PATTERN='error:|erreur :|fatal error|undefined reference|Killed|signal terminated|\*\*\*|Error [0-9]+|Erreur [0-9]+'
-        grep -n -m5 -B3 -A8 -E "$ERR_PATTERN" "$BUILD/build-serial.log" | tee -a "$REPORT"
-        log "--- 25 dernieres lignes du journal ---"
-        tail -n 25 "$BUILD/build-serial.log" | tee -a "$REPORT"
-        finish
-        exit 1
+        ERR_PATTERN='error:|erreur :|fatal error|undefined reference|Killed|signal terminated|internal compiler error|out of memory|\*\*\*|Error [0-9]+|Erreur [0-9]+'
+        log "La passe parallele a echoue (code $rc). Causes frequentes : memoire insuffisante ou course entre taches."
+        if grep -q -E 'Killed|out of memory|signal terminated' "$BUILD/build.log"; then
+            log "=> manque de memoire probable (voir ci-dessous) ; on retente avec moins de taches."
+        fi
+        grep -n -m3 -B1 -A4 -E "$ERR_PATTERN" "$BUILD/build.log" | tee -a "$REPORT"
+        # On retente d'abord avec la moitie des taches, puis en serie.
+        half=$(( ($(nproc) + 1) / 2 ))
+        ok=0
+        for jobs in "$half" 1; do
+            [ "$jobs" -lt 1 ] && jobs=1
+            log "nouvel essai avec --parallel $jobs ..."
+            if cmake --build "$BUILD" --parallel "$jobs" > "$BUILD/build-retry.log" 2>&1; then
+                ok=1
+                log "compilation reussie avec --parallel $jobs : le code est bon, seule la passe parallele complete a echoue."
+                break
+            fi
+            [ "$jobs" -eq 1 ] && break
+        done
+        if [ "$ok" -ne 1 ]; then
+            log "ECHEC de la compilation, meme en serie. Premiere erreur :"
+            # Motif strict : "error:" avec deux-points, pas le mot dans un nom de fichier
+            # (ex. errordialoghandler.cpp).
+            grep -n -m5 -B3 -A8 -E "$ERR_PATTERN" "$BUILD/build-retry.log" | tee -a "$REPORT"
+            log "--- 25 dernieres lignes du journal ---"
+            tail -n 25 "$BUILD/build-retry.log" | tee -a "$REPORT"
+            finish
+            exit 1
+        fi
+    else
+        log "compilation terminee sans erreur."
     fi
-    log "compilation terminee sans erreur."
 fi
 
 section "Support QML"
