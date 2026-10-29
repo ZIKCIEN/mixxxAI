@@ -18,7 +18,9 @@ case "$1" in
 
     setup)
         source /etc/os-release 2>/dev/null
-        case "${VERSION_CODENAME}" in
+        # Derivatives (e.g. Linux Mint) set UBUNTU_CODENAME to the Ubuntu base release.
+        CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME}}"
+        case "${CODENAME}" in
             jammy|bullseye|victoria|vera|vanessa|virginia) # <= Ubuntu 22.04.5 LTS
                 PACKAGES_EXTRA=(
                     libqt6shadertools6-dev \
@@ -32,7 +34,7 @@ case "$1" in
                 )
         esac
 
-        case "${VERSION_CODENAME}" in
+        case "${CODENAME}" in
             jammy|noble|oracular|bullseye|bookworm|victoria|vera|vanessa|virginia|wilma|wildflower) # <= Ubuntu 24.10
                 # qt6-svg-plugins not available
                 ;;
