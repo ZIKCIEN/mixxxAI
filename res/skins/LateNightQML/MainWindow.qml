@@ -262,10 +262,12 @@ Item {
                 implicitHeight: 9
                 implicitWidth: 8
 
+                // Hit area taller than the 9px visual handle, for touch screens.
                 containmentMask: Item {
-                    height: 12
+                    height: 24
                     width: splitView.width
                     x: (handleDelegate.width - width) / 2
+                    y: (handleDelegate.height - height) / 2
                 }
 
                 Image {
