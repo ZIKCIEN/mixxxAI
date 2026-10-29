@@ -195,7 +195,26 @@ Item {
 
     Connections {
         target: Qt.application
+        // Not every Qt version/platform exposes this signal; stay silent if not.
+        ignoreUnknownSignals: true
         function onScreensChanged() { recoverTimer.restart(); }
+    }
+
+    // Independent of screen signals: whenever a secondary window is about to
+    // be shown, make sure it is not stranded outside the current desktop.
+    Connections {
+        target: root.libraryWindow
+        function onVisibleChanged() {
+            if (root.libraryWindow.visible)
+                recoverTimer.restart();
+        }
+    }
+    Connections {
+        target: root.toolsWindow
+        function onVisibleChanged() {
+            if (root.toolsWindow.visible)
+                recoverTimer.restart();
+        }
     }
 
     Connections {
