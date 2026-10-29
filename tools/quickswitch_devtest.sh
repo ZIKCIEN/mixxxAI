@@ -227,29 +227,51 @@ if [ "$OFFSCREEN" = 1 ]; then
     log "mode sans fenetre (offscreen)"
 fi
 log "profil de test : $PROFILE"
-timeout -s TERM -k 5 "$RUN_SECONDS" "$BIN" --new-ui --settings-path "$PROFILE" --log-level debug > "$RUNLOG" 2>&1
-rc=$?
-case "$rc" in
-    124) log "OK : Mixxx est reste lance ${RUN_SECONDS}s puis a ete arrete (comportement normal)." ;;
-    0) log "Mixxx s'est ferme de lui-meme (code 0) avant la fin du delai." ;;
-    *) log "SORTIE ANORMALE : code $rc (plantage probable avant ${RUN_SECONDS}s)." ;;
-esac
-
-# --- Pile d'appels en cas de plantage ---------------------------------------
-if [ "$rc" != 124 ] && [ "$rc" != 0 ]; then
-    section "Pile d'appels du plantage (gdb)"
-    if command -v gdb > /dev/null 2>&1; then
-        log "relance sous gdb pour obtenir la pile d'appels (jusqu'a $((RUN_SECONDS + 20))s)..."
-        timeout -s TERM -k 5 "$((RUN_SECONDS + 20))" gdb -batch -ex run -ex "bt 30" \
-            --args "$BIN" --new-ui --settings-path "$PROFILE" --log-level debug > "$BUILD/gdb.log" 2>&1
-        if grep -q -E "SIGSEGV|SIGABRT|SIGBUS|SIGFPE" "$BUILD/gdb.log"; then
-            grep -E "SIGSEGV|SIGABRT|SIGBUS|SIGFPE|^#[0-9]+ " "$BUILD/gdb.log" | head -n 40 | tee -a "$REPORT"
-        else
-            log "gdb n'a pas reproduit le plantage (derniere ligne : $(tail -n 1 "$BUILD/gdb.log"))."
+MIXXX_ARGS=(--new-ui --settings-path "$PROFILE" --log-level debug)
+CRASH_RE='SIGSEGV|SIGABRT|SIGBUS|SIGFPE|SIGILL'
+if command -v gdb > /dev/null 2>&1; then
+    # Mixxx est lance directement sous gdb : un plantage (meme rare ou
+    # aleatoire) donne tout de suite sa pile d'appels. A la fin du delai, on
+    # envoie SIGTERM a Mixxx lui-meme (pas a gdb) pour un arret normal.
+    log "lancement sous gdb (pile d'appels automatique en cas de plantage)"
+    gdb -batch -ex "handle SIGTERM nostop noprint pass" -ex run -ex "bt 30" \
+        --args "$BIN" "${MIXXX_ARGS[@]}" > "$RUNLOG" 2>&1 &
+    GDB_PID=$!
+    for ((t = 0; t < RUN_SECONDS; t++)); do
+        kill -0 "$GDB_PID" 2> /dev/null || break
+        sleep 1
+    done
+    timed_out=0
+    if kill -0 "$GDB_PID" 2> /dev/null; then
+        timed_out=1
+        pkill -TERM -P "$GDB_PID" 2> /dev/null
+        for ((t = 0; t < 15; t++)); do
+            kill -0 "$GDB_PID" 2> /dev/null || break
+            sleep 1
+        done
+        if kill -0 "$GDB_PID" 2> /dev/null; then
+            pkill -KILL -P "$GDB_PID" 2> /dev/null
+            kill -KILL "$GDB_PID" 2> /dev/null
         fi
-    else
-        log "gdb absent : installe-le avec  sudo apt install gdb  puis relance le script."
     fi
+    wait "$GDB_PID" 2> /dev/null
+    if grep -q -E "$CRASH_RE" "$RUNLOG"; then
+        log "PLANTAGE detecte. Pile d'appels :"
+        grep -E "$CRASH_RE|^#[0-9]+ " "$RUNLOG" | head -n 40 | tee -a "$REPORT"
+    elif [ "$timed_out" = 1 ]; then
+        log "OK : Mixxx est reste lance ${RUN_SECONDS}s puis a ete arrete (comportement normal)."
+    else
+        log "Mixxx s'est ferme de lui-meme avant la fin du delai (sans plantage detecte)."
+    fi
+else
+    log "gdb absent (sudo apt install gdb) : lancement simple, sans pile d'appels."
+    timeout -s TERM -k 5 "$RUN_SECONDS" "$BIN" "${MIXXX_ARGS[@]}" > "$RUNLOG" 2>&1
+    rc=$?
+    case "$rc" in
+        124) log "OK : Mixxx est reste lance ${RUN_SECONDS}s puis a ete arrete (comportement normal)." ;;
+        0) log "Mixxx s'est ferme de lui-meme (code 0) avant la fin du delai." ;;
+        *) log "SORTIE ANORMALE : code $rc (plantage probable avant ${RUN_SECONDS}s)." ;;
+    esac
 fi
 
 # --- Analyse des journaux ----------------------------------------------------

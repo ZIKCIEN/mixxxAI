@@ -249,6 +249,7 @@ Item {
                 }
                 Skin.Button {
                     text: libraryWindow.visible ? qsTr("Masquer B") : qsTr("Bibliothèque B")
+                    implicitWidth: 92
                     activeColor: Theme.white
                     onClicked: {
                         if (libraryWindow.visible) {
@@ -263,6 +264,7 @@ Item {
                 }
                 Skin.Button {
                     text: toolsWindow.visible ? qsTr("Masquer C") : qsTr("Effets C")
+                    implicitWidth: 76
                     activeColor: Theme.white
                     onClicked: {
                         if (toolsWindow.visible) {
@@ -290,16 +292,19 @@ Item {
                 }
                 Skin.Button {
                     text: qsTr("Rotation")
+                    implicitWidth: 68
                     activeColor: Theme.white
                     onClicked: quickSwitchManager.rotate()
                 }
                 Skin.Button {
                     text: qsTr("Annuler")
+                    implicitWidth: 68
                     activeColor: Theme.white
                     onClicked: quickSwitchManager.undo()
                 }
                 Skin.Button {
                     text: qsTr("Récupérer")
+                    implicitWidth: 84
                     activeColor: Theme.white
                     onClicked: quickSwitchManager.resetNearMainWindow()
                 }
