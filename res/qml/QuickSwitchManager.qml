@@ -156,19 +156,61 @@ Item {
         saveLayout();
     }
 
+    property bool screenInfoWarned: false
+
+    // Rectangle of a screen in desktop coordinates. Depending on the Qt
+    // version the entries of Qt.application.screens expose either
+    // virtualX/virtualY/width/height or a geometry rect; return null if
+    // neither is available.
+    function screenRect(screen) {
+        if (!screen)
+            return null;
+        if (screen.virtualX !== undefined && screen.width !== undefined) {
+            return {
+                x: screen.virtualX,
+                y: screen.virtualY,
+                width: screen.width,
+                height: screen.height
+            };
+        }
+        if (screen.geometry !== undefined && screen.geometry !== null) {
+            return {
+                x: screen.geometry.x,
+                y: screen.geometry.y,
+                width: screen.geometry.width,
+                height: screen.geometry.height
+            };
+        }
+        return null;
+    }
+
     // A window is reachable if enough of it overlaps at least one screen
-    // for the user to grab its title bar.
+    // for the user to grab its title bar. If no screen geometry can be read
+    // at all, assume reachable rather than moving windows blindly.
     function isReachable(win) {
         var screens = Qt.application.screens;
         var margin = 100;
-        for (var i = 0; i < screens.length; ++i) {
-            var g = screens[i].geometry;
-            if (win.x + win.width - margin > g.x
-                    && win.x + margin < g.x + g.width
-                    && win.y + win.height - margin > g.y
-                    && win.y + margin < g.y + g.height) {
-                return true;
+        var known = 0;
+        if (screens) {
+            for (var i = 0; i < screens.length; ++i) {
+                var g = screenRect(screens[i]);
+                if (!g)
+                    continue;
+                ++known;
+                if (win.x + win.width - margin > g.x
+                        && win.x + margin < g.x + g.width
+                        && win.y + win.height - margin > g.y
+                        && win.y + margin < g.y + g.height) {
+                    return true;
+                }
             }
+        }
+        if (known === 0) {
+            if (!screenInfoWarned) {
+                screenInfoWarned = true;
+                console.warn("QuickSwitch: screen geometry unavailable, automatic recovery disabled");
+            }
+            return true;
         }
         return false;
     }
