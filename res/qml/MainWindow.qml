@@ -17,6 +17,7 @@ Item {
     property alias editDeck: editDeckButton.checked
     property var focusedDeck: null
     property alias maximizeLibrary: maximizeLibraryButton.checked
+    property bool libraryDetached: false
     readonly property int numDecks: 4
     readonly property int numPreviewDecks: 1
     readonly property int numSamplers: 16
@@ -24,6 +25,82 @@ Item {
     readonly property bool show4decks: show4DecksButton.checked && show4DecksButton.visible
     property alias showEffects: showEffectsButton.checked
     property alias showSamplers: showSamplersButton.checked
+
+    // These are separate top-level windows, not additional Mixxx instances.
+    // The audio engine and all ControlProxy objects remain shared.
+    Window {
+        id: libraryWindow
+
+        title: qsTr("Mixxx — Bibliothèque")
+        color: Theme.backgroundColor
+        flags: Qt.Window
+        x: root.applicationWindow.x + 80
+        y: root.applicationWindow.y + 80
+        width: 1000
+        height: 700
+        minimumWidth: 680
+        minimumHeight: 420
+        visible: false
+
+        onVisibleChanged: root.libraryDetached = visible
+        onClosing: function(close) {
+            close.accepted = false
+            visible = false
+        }
+
+        // Created only while the window is shown, so that there is never a
+        // second hidden Library instance next to the one in the main window.
+        Loader {
+            id: detachedLibrary
+
+            active: libraryWindow.visible
+            anchors.fill: parent
+
+            sourceComponent: Component {
+                Skin.Library {
+                }
+            }
+        }
+    }
+
+    Window {
+        id: toolsWindow
+
+        title: qsTr("Mixxx — Effets et auxiliaires")
+        color: Theme.backgroundColor
+        flags: Qt.Window
+        x: root.applicationWindow.x + 120
+        y: root.applicationWindow.y + 120
+        width: 760
+        height: 700
+        minimumWidth: 600
+        minimumHeight: 420
+        visible: false
+
+        onClosing: function(close) {
+            close.accepted = false
+            visible = false
+        }
+
+        // Loaded on demand: the effect units are only instantiated while shown.
+        Loader {
+            active: toolsWindow.visible
+            anchors.fill: parent
+
+            sourceComponent: Component {
+                Skin.AuxiliaryPanel {
+                }
+            }
+        }
+    }
+
+    Skin.QuickSwitchManager {
+        id: quickSwitchManager
+
+        mainWindow: root.applicationWindow
+        libraryWindow: libraryWindow
+        toolsWindow: toolsWindow
+    }
 
     Loader {
         id: nativeApplicationMenuLoader
@@ -53,7 +130,11 @@ Item {
         numberOfDecks: root.show4decks ? root.numDecks : 2
 
         onFocusLibrarySearchRequested: {
-            if (library.item) {
+            if (root.libraryDetached && detachedLibrary.item) {
+                libraryWindow.raise();
+                libraryWindow.requestActivate();
+                detachedLibrary.item.focusSearch();
+            } else if (library.item) {
                 library.item.focusSearch();
             }
         }
@@ -165,6 +246,67 @@ Item {
                     activeColor: Theme.white
                     checkable: true
                     text: "Sampler"
+                }
+                Skin.Button {
+                    text: libraryWindow.visible ? qsTr("Masquer B") : qsTr("Bibliothèque B")
+                    implicitWidth: 92
+                    activeColor: Theme.white
+                    onClicked: {
+                        if (libraryWindow.visible) {
+                            libraryWindow.hide()
+                        } else {
+                            root.maximizeLibrary = false
+                            root.libraryDetached = true
+                            libraryWindow.show()
+                            libraryWindow.raise()
+                        }
+                    }
+                }
+                Skin.Button {
+                    text: toolsWindow.visible ? qsTr("Masquer C") : qsTr("Effets C")
+                    implicitWidth: 76
+                    activeColor: Theme.white
+                    onClicked: {
+                        if (toolsWindow.visible) {
+                            toolsWindow.hide()
+                        } else {
+                            toolsWindow.show()
+                            toolsWindow.raise()
+                        }
+                    }
+                }
+                Skin.Button {
+                    text: qsTr("1↔2")
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.swap(0, 1)
+                }
+                Skin.Button {
+                    text: qsTr("2↔3")
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.swap(1, 2)
+                }
+                Skin.Button {
+                    text: qsTr("1↔3")
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.swap(0, 2)
+                }
+                Skin.Button {
+                    text: qsTr("Rotation")
+                    implicitWidth: 68
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.rotate()
+                }
+                Skin.Button {
+                    text: qsTr("Annuler")
+                    implicitWidth: 68
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.undo()
+                }
+                Skin.Button {
+                    text: qsTr("Récupérer")
+                    implicitWidth: 84
+                    activeColor: Theme.white
+                    onClicked: quickSwitchManager.resetNearMainWindow()
                 }
                 Item {
                     Layout.fillWidth: true
@@ -645,7 +787,7 @@ Item {
                 Loader {
                     id: library
 
-                    active: root.maximizeLibrary || root.height - mixer.height >= 400
+                    active: !root.libraryDetached && (root.maximizeLibrary || root.height - mixer.height >= 400)
                     width: parent.width
 
                     sourceComponent: Component {
