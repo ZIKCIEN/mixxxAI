@@ -181,7 +181,12 @@ if [ "$DO_BUILD" = 1 ]; then
     if [ "$rc" -ne 0 ]; then
         log "ECHEC de la compilation (code $rc). Relance en serie pour isoler la premiere erreur..."
         cmake --build "$BUILD" --parallel 1 > "$BUILD/build-serial.log" 2>&1
-        grep -n -i -m5 -B3 -A8 "error\|erreur" "$BUILD/build-serial.log" | tee -a "$REPORT"
+        # Motif strict : "error:" avec deux-points, pas le mot dans un nom de fichier
+        # (ex. errordialoghandler.cpp).
+        ERR_PATTERN='error:|erreur :|fatal error|undefined reference|Killed|signal terminated|\*\*\*|Error [0-9]+|Erreur [0-9]+'
+        grep -n -m5 -B3 -A8 -E "$ERR_PATTERN" "$BUILD/build-serial.log" | tee -a "$REPORT"
+        log "--- 25 dernieres lignes du journal ---"
+        tail -n 25 "$BUILD/build-serial.log" | tee -a "$REPORT"
         finish
         exit 1
     fi
