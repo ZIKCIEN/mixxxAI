@@ -419,7 +419,8 @@ void CrateFeature::slotCreateCrate() {
     CrateId crateId =
             CrateFeatureHelper(m_pTrackCollection, m_pConfig)
                     .createEmptyCrate();
-    if (crateId.isValid()) {
+    // There is no sidebar widget when the library is shown by the QML UI.
+    if (crateId.isValid() && m_pSidebarWidget) {
         // expand Crates and scroll to new crate
         m_pSidebarWidget->selectChildIndex(indexFromCrateId(crateId), false);
     }
