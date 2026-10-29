@@ -78,6 +78,39 @@ détermine `requiredPaneHeight` et peut casser les animations de bascule
 3. Écran tactile : taille cible des poignées et des boutons (actuellement
    poignée de 9 px de haut, zone de saisie de 12 px).
 
+## Correction du plan pilote (après relecture, et référence de tests)
+
+Référence mesurée sur la branche non modifiée (`tools/latenightqml_test.sh`,
+Linux Mint 22.3, Qt 6.4.2) : 11 tests sur 11 passent, dont le démarrage du
+skin (`QmlStartupSmokeTest.Starts/LateNightQML`). Pas encore de captures
+d'écran.
+
+**Le plan « bibliothèque en troisième volet » ci-dessous n'apporterait pas de
+fonction nouvelle** et ajouterait un risque sur la bascule « grande
+bibliothèque ». Raison, d'après les règles de `SplitView` du fichier :
+- `deckPane` a `SplitView.fillHeight: library.active` (donc vrai : `library`
+  est toujours actif) et `SplitView.minimumHeight: requiredPaneHeight` ;
+- `WaveformStack` a une hauteur préférée mémorisée (`lastVisiblePreferredHeight`).
+
+La poignée existante règle donc déjà la hauteur des formes d'onde, et la
+bibliothèque absorbe le reste. La bibliothèque est redimensionnable
+indirectement, et une poignée entre decks et bibliothèque ne pourrait pas
+réduire `deckPane` sous `requiredPaneHeight` (decks + FX + samplers + aux), ni
+le faire grandir utilement. Ce constat vient de la lecture du code ; il n'a pas
+été vérifié à l'écran.
+
+Ce qui apporterait une fonction nouvelle demande des décisions de conception
+(voir la question posée dans la conversation) :
+- **Decks** : leur taille est discrète (Mini 53 px, Compact 150 px, Full 206 px,
+  `LateNightTheme`, pilotée par `LayoutState` / `Toolbar`). « Redimensionnable »
+  signifie-t-il changer de taille discrète à la souris, ou une hauteur libre ?
+- **FX, Samples, AUX** : leur hauteur vaut aujourd'hui exactement le contenu
+  (`implicitHeight`). Redimensionner suppose de rogner/faire défiler le contenu
+  ou de le faire évoluer avec la hauteur.
+
+Le plan ci-dessous reste dans le document à titre d'historique et ne doit pas
+être suivi tel quel.
+
 ## Plan de migration de la bibliothèque (section pilote)
 
 Rien de ce qui suit n'est implémenté. Ce plan découle de la lecture de
