@@ -1,4 +1,5 @@
 import "../../qml" as Skin
+import "Controls" as LateNightControls
 import "LateNightTheme"
 import "Deck" as LateNightDeck
 import "Effects" as LateNightEffects
@@ -99,6 +100,20 @@ Item {
             layoutMaximizedLibrary = maximizeLibrary;
     }
 
+    // Rack sections (FX, samplers, mic/aux) end with a resize handle. The rack
+    // keeps its natural height and is clipped; "userContentHeight" is the
+    // content height chosen with the handle, or -1 for the natural height.
+    readonly property real sectionHandleHeight: 14
+    readonly property real sectionMinimumContentHeight: 40
+
+    function resizableSectionHeight(naturalHeight, userContentHeight) {
+        if (naturalHeight <= 0)
+            return 0;
+        const content = userContentHeight >= 0
+                ? Math.min(naturalHeight, Math.max(sectionMinimumContentHeight, userContentHeight))
+                : naturalHeight;
+        return content + sectionHandleHeight;
+    }
     function finishBigLibraryTransitionWhenReady() {
         if (!bigLibraryTransition || !bigLibraryContentReady || !bigLibraryAnimationsReady)
             return;
@@ -815,7 +830,10 @@ Item {
                     id: effectsSection
 
                     clip: true
-                    height: root.showEffects && !root.layoutMaximizedLibrary ? effectsRack.implicitHeight : 0
+                    property bool userResizing: false
+                    // -1: natural height of the rack.
+                    property real userContentHeight: -1
+                    height: root.showEffects && !root.layoutMaximizedLibrary ? root.resizableSectionHeight(effectsRack.implicitHeight, effectsSection.userContentHeight) : 0
                     opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
                     visible: height > 0
                     width: parent.width
@@ -823,7 +841,7 @@ Item {
                     z: 2
 
                     Behavior on height {
-                        enabled: LateNightTheme.layoutAnimationsEnabled && (!root.bigLibraryTransition || root.bigLibraryEffectsRestoreActive)
+                        enabled: LateNightTheme.layoutAnimationsEnabled && (!root.bigLibraryTransition || root.bigLibraryEffectsRestoreActive) && !effectsSection.userResizing
 
                         SpringAnimation {
                             damping: 0.2
@@ -843,14 +861,36 @@ Item {
                     LateNightEffects.EffectsRack {
                         id: effectsRack
 
-                        anchors.fill: parent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: implicitHeight
+                    }
+                    LateNightControls.SectionResizeHandle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        contentHeight: effectsSection.height - root.sectionHandleHeight
+                        height: root.sectionHandleHeight
+                        maximumContentHeight: effectsRack.implicitHeight
+                        minimumContentHeight: root.sectionMinimumContentHeight
+                        z: 10
+
+                        onContentHeightRequested: function (requestedHeight) {
+                            effectsSection.userContentHeight = requestedHeight;
+                        }
+                        onResetRequested: effectsSection.userContentHeight = -1
+                        onResizingChanged: effectsSection.userResizing = resizing
                     }
                 }
                 Item {
                     id: samplersSection
 
                     clip: true
-                    height: root.showSamplers && !root.layoutMaximizedLibrary ? samplers.implicitHeight : 0
+                    property bool userResizing: false
+                    // -1: natural height of the rack.
+                    property real userContentHeight: -1
+                    height: root.showSamplers && !root.layoutMaximizedLibrary ? root.resizableSectionHeight(samplers.implicitHeight, samplersSection.userContentHeight) : 0
                     opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
                     visible: height > 0
                     width: parent.width
@@ -858,7 +898,7 @@ Item {
                     z: 2
 
                     Behavior on height {
-                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition
+                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition && !samplersSection.userResizing
 
                         SpringAnimation {
                             damping: 0.2
@@ -878,14 +918,36 @@ Item {
                     LateNightSamplers.SamplersRack {
                         id: samplers
 
-                        anchors.fill: parent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: implicitHeight
+                    }
+                    LateNightControls.SectionResizeHandle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        contentHeight: samplersSection.height - root.sectionHandleHeight
+                        height: root.sectionHandleHeight
+                        maximumContentHeight: samplers.implicitHeight
+                        minimumContentHeight: root.sectionMinimumContentHeight
+                        z: 10
+
+                        onContentHeightRequested: function (requestedHeight) {
+                            samplersSection.userContentHeight = requestedHeight;
+                        }
+                        onResetRequested: samplersSection.userContentHeight = -1
+                        onResizingChanged: samplersSection.userResizing = resizing
                     }
                 }
                 Item {
                     id: micAuxSection
 
                     clip: true
-                    height: root.showMicAux && !root.layoutMaximizedLibrary ? micAuxRack.implicitHeight : 0
+                    property bool userResizing: false
+                    // -1: natural height of the rack.
+                    property real userContentHeight: -1
+                    height: root.showMicAux && !root.layoutMaximizedLibrary ? root.resizableSectionHeight(micAuxRack.implicitHeight, micAuxSection.userContentHeight) : 0
                     opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
                     visible: height > 0
                     width: parent.width
@@ -893,7 +955,7 @@ Item {
                     z: 2
 
                     Behavior on height {
-                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition
+                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition && !micAuxSection.userResizing
 
                         SpringAnimation {
                             damping: 0.2
@@ -913,7 +975,26 @@ Item {
                     LateNightMicAux.MicAuxRack {
                         id: micAuxRack
 
-                        anchors.fill: parent
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: implicitHeight
+                    }
+                    LateNightControls.SectionResizeHandle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        contentHeight: micAuxSection.height - root.sectionHandleHeight
+                        height: root.sectionHandleHeight
+                        maximumContentHeight: micAuxRack.implicitHeight
+                        minimumContentHeight: root.sectionMinimumContentHeight
+                        z: 10
+
+                        onContentHeightRequested: function (requestedHeight) {
+                            micAuxSection.userContentHeight = requestedHeight;
+                        }
+                        onResetRequested: micAuxSection.userContentHeight = -1
+                        onResizingChanged: micAuxSection.userResizing = resizing
                     }
                 }
                 Loader {
