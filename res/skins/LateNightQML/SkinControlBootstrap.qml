@@ -68,5 +68,7 @@ Item {
     Mixxx.SkinControlCreator { defaultValue: 1.0; group: "[Skin]"; key: "show_vumeters_compact"; persist: true }
     Mixxx.SkinControlCreator { defaultValue: 1.0; group: "[Skin]"; key: "latenight_show_sync_button_compact"; persist: true }
     Mixxx.SkinControlCreator { defaultValue: 1.0; group: "[Skin]"; key: "latenight_deck_size_without_mixer"; persist: true }
+    // -1 = Docks 3/4 follow the size of Docks 1/2.
+    Mixxx.SkinControlCreator { defaultValue: -1.0; group: "[Skin]"; key: "latenight_deck_row2_size_without_mixer"; persist: true }
     Mixxx.SkinControlCreator { defaultValue: 1.0; group: "[Skin]"; key: "latenight_max_lib_show_decks"; persist: true }
 }

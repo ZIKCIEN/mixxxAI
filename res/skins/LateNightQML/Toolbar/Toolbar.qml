@@ -19,6 +19,11 @@ Rectangle {
     property bool editDeck: false
     required property var applicationMenuActions
     property int deckSizeWithoutMixer: Toolbar.Compact
+    // -1: the second deck row (Docks 3/4) follows deckSizeWithoutMixer.
+    property int deckSizeRow2Override: -1
+    readonly property int deckSizeRow2WithoutMixer: deckSizeRow2Override < 0
+            ? deckSizeWithoutMixer
+            : Math.max(Toolbar.Mini, Math.min(Toolbar.Full, Math.round(deckSizeRow2Override)))
     property alias maximizeLibrary: maximizeLibraryButton.checked
     readonly property bool show4decks: show4DecksButton.checked && show4DecksButton.visible
     property bool show4decksAvailable: true
@@ -140,6 +145,7 @@ Rectangle {
         showMaximizedLibraryControl.value = 0.0;
         maxLibraryDecksControl.value = 1.0;
         deckSizeControl.value = Toolbar.Compact;
+        deckSizeRow2Control.value = -1.0;
         showPreviewDecksControl.value = 0.0;
         showLibraryCoverArtControl.value = 1.0;
         samplerRowsControl.value = 1.0;
@@ -257,6 +263,22 @@ Rectangle {
         setControlValueIfInitialized(maxLibraryDecksControl, enabled ? 1.0 : 0.0);
     }
     function setDeckSize(size) {
+        const normalizedSize = Math.max(Toolbar.Mini, Math.min(Toolbar.Full, Math.round(size)));
+        deckSizeWithoutMixer = normalizedSize;
+        setControlValueIfInitialized(deckSizeControl, normalizedSize);
+        // The toolbar size applies to both deck rows.
+        deckSizeRow2Override = -1;
+        setControlValueIfInitialized(deckSizeRow2Control, -1.0);
+    }
+    // Resizes a single deck row (1 = Docks 1/2, 2 = Docks 3/4) from the
+    // row resize handles. Passing a negative size on row 2 makes it follow row 1 again.
+    function setDeckRowSize(row, size) {
+        if (row === 2) {
+            const override = size < 0 ? -1 : Math.max(Toolbar.Mini, Math.min(Toolbar.Full, Math.round(size)));
+            deckSizeRow2Override = override;
+            setControlValueIfInitialized(deckSizeRow2Control, override);
+            return;
+        }
         const normalizedSize = Math.max(Toolbar.Mini, Math.min(Toolbar.Full, Math.round(size)));
         deckSizeWithoutMixer = normalizedSize;
         setControlValueIfInitialized(deckSizeControl, normalizedSize);
@@ -407,6 +429,21 @@ Rectangle {
         }
         onValueChanged: {
             root.deckSizeWithoutMixer = Math.max(Toolbar.Mini, Math.min(Toolbar.Full, Math.round(value)));
+        }
+    }
+    Mixxx.ControlProxy {
+        id: deckSizeRow2Control
+
+        group: "[Skin]"
+        key: "latenight_deck_row2_size_without_mixer"
+
+        onInitializedChanged: {
+            if (deckSizeRow2Control.initialized) {
+                root.deckSizeRow2Override = Math.round(value);
+            }
+        }
+        onValueChanged: {
+            root.deckSizeRow2Override = Math.round(value);
         }
     }
     Mixxx.ControlProxy {

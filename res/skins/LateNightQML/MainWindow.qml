@@ -22,6 +22,8 @@ Item {
 
     readonly property int activeDeckState: layoutState.effectiveDeckSize
     readonly property int activeDeckHeight: activeDeckState === 0 ? LateNightTheme.miniDeckHeight : (activeDeckState === 1 ? LateNightTheme.compactDeckHeight : LateNightTheme.fullDeckHeight)
+    readonly property int activeSecondRowDeckState: layoutState.effectiveSecondRowDeckSize
+    readonly property int activeSecondRowDeckHeight: heightForDeckState(activeSecondRowDeckState)
     property alias editDeck: toolbar.editDeck
     property var focusedDeck: null
     property alias maximizeLibrary: toolbar.maximizeLibrary
@@ -40,6 +42,7 @@ Item {
             && !waveformsPreferredHeightAnimation.running
             && !waveformsOpacityAnimation.running
             && !deckHeightAnimation.running
+            && !deckSecondRowHeightAnimation.running
             && !deckRowExpansionAnimation.running
             && !deckSideMarginLayoutAnimation.running
             && !deck1AnchorAnimation.running
@@ -56,6 +59,9 @@ Item {
     readonly property int bigLibraryTransitionDuration: restoringFromBigLibrary ? 80 : 100
     readonly property int deckModeTransitionDuration: 100
     readonly property int normalDeckState: layoutState.normalizedSavedDeckSize
+    readonly property int normalSecondRowDeckState: layoutState.normalizedSavedSecondRowDeckSize
+    // The deck row handles only make sense when the deck sizes are free to change.
+    readonly property bool deckRowResizeEnabled: !showMixer && !layoutMaximizedLibrary && !bigLibraryTransition && showDeckArea
     readonly property int numDecks: 4
     readonly property int numSamplers: 64
     readonly property bool show4decks: toolbar.show4decks
@@ -81,6 +87,13 @@ Item {
         bigLibraryReadinessTimer.start();
     }
     onNormalDeckStateChanged: {
+        if (bigLibraryTransition || maximizeLibrary || showMixer)
+            return;
+
+        deckModeTransition = true;
+        deckModeTransitionTimer.restart();
+    }
+    onNormalSecondRowDeckStateChanged: {
         if (bigLibraryTransition || maximizeLibrary || showMixer)
             return;
 
@@ -156,11 +169,15 @@ Item {
         maximizeLibrary: root.layoutMaximizedLibrary
         mixerVisible: root.showMixer
         savedDeckSize: toolbar.deckSizeWithoutMixer
+        savedSecondRowDeckSize: toolbar.deckSizeRow2WithoutMixer
         show4decks: root.show4decks
         showCompactVuMetersSetting: showCompactVuMetersProxy.value > 0
         showMaximizedDecks: root.showMaximizedDecks
     }
 
+    function heightForDeckState(state) {
+        return state === 0 ? LateNightTheme.miniDeckHeight : (state === 1 ? LateNightTheme.compactDeckHeight : LateNightTheme.fullDeckHeight);
+    }
     function focusLegacyLibrarySearch() {
         Qt.callLater(function() {
             if (library.item) {
@@ -337,17 +354,22 @@ Item {
                 property real deckRowExpansion: root.show4decks ? 1 : 0
                 readonly property real deckRowCount: 1 + Math.max(0, deckRowExpansion)
                 readonly property real basePaneHeight: Math.max(deckRowsHeight, mixerLayoutVisible ? mixer.implicitHeight + LateNightTheme.deckRowGutter : 0)
+                // Row 1 takes its share of the stack in proportion to its own deck height;
+                // with equal deck sizes this is the same even split as before.
                 readonly property real deckRowHeight: visibleDeckHeight > 0
-                        ? (deckStackHeight - LateNightTheme.deckRowGutter * (deckRowCount - 1)) / deckRowCount
+                        ? (deckStackHeight - LateNightTheme.deckRowGutter * (deckRowCount - 1)) * visibleDeckHeight
+                                / (visibleDeckHeight + (deckRowCount - 1) * visibleSecondRowDeckHeight)
                         : 0
                 readonly property real deckRowsHeight: visibleDeckHeight > 0
-                        ? (visibleDeckHeight + LateNightTheme.deckRowGutter) * deckRowCount
+                        ? (visibleDeckHeight + LateNightTheme.deckRowGutter)
+                                + (visibleSecondRowDeckHeight + LateNightTheme.deckRowGutter) * (deckRowCount - 1)
                         : 0
                 property real deckSideMargin: root.showMixer && !root.layoutMaximizedLibrary ? LateNightTheme.deckMixerGutter : 2
                 readonly property real deckStackHeight: basePaneHeight - LateNightTheme.deckRowGutter
                 readonly property bool mixerLayoutVisible: root.showMixer && !root.layoutMaximizedLibrary
                 readonly property real requiredPaneHeight: basePaneHeight + effectsSection.height + samplersSection.height + micAuxSection.height
                 property real visibleDeckHeight: root.layoutMaximizedLibrary ? (root.showMaximizedDecks ? LateNightTheme.miniDeckHeight : 0) : root.activeDeckHeight
+                property real visibleSecondRowDeckHeight: root.layoutMaximizedLibrary ? (root.showMaximizedDecks ? LateNightTheme.miniDeckHeight : 0) : root.activeSecondRowDeckHeight
 
                 SplitView.fillHeight: library.active
                 SplitView.maximumHeight: library.active ? undefined : requiredPaneHeight
@@ -360,6 +382,17 @@ Item {
 
                     NumberAnimation {
                         id: deckHeightAnimation
+
+                        duration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration
+                                : root.deckModeTransition ? root.deckModeTransitionDuration : 250
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                Behavior on visibleSecondRowDeckHeight {
+                    enabled: LateNightTheme.layoutAnimationsEnabled
+
+                    NumberAnimation {
+                        id: deckSecondRowHeightAnimation
 
                         duration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration
                                 : root.deckModeTransition ? root.deckModeTransitionDuration : 250
@@ -685,7 +718,7 @@ Item {
                     sourceComponent: Component {
                         LateNightDeck.Deck {
                             anchors.fill: parent
-                            deckState: root.layoutMaximizedLibrary ? LateNightDeck.Deck.Mini : root.activeDeckState
+                            deckState: root.layoutMaximizedLibrary ? LateNightDeck.Deck.Mini : root.activeSecondRowDeckState
                             editMode: root.editDeck
                             group: deck3.group
                         }
@@ -748,7 +781,7 @@ Item {
                     sourceComponent: Component {
                         LateNightDeck.Deck {
                             anchors.fill: parent
-                            deckState: root.layoutMaximizedLibrary ? LateNightDeck.Deck.Mini : root.activeDeckState
+                            deckState: root.layoutMaximizedLibrary ? LateNightDeck.Deck.Mini : root.activeSecondRowDeckState
                             editMode: root.editDeck
                             group: deck4.group
                         }
@@ -798,6 +831,37 @@ Item {
                         top: deckFirstRowBottom.bottom
                         topMargin: LateNightTheme.deckRowGutter * Math.max(0, deckPane.deckRowExpansion)
                     }
+                }
+
+                // Drag the bottom edge of a deck row to switch it between Mini, Compact and Full.
+                // Double-click resets: Docks 1/2 to Compact, Docks 3/4 back to following Docks 1/2.
+                DeckRowHandle {
+                    id: deckRow1Handle
+
+                    boundaryY: root.show4decks ? deckPane.deckRowHeight : deckPane.deckStackHeight
+                    currentState: root.normalDeckState
+                    enabled: visible
+                    reference: deckPane
+                    rowTop: 0
+                    visible: root.deckRowResizeEnabled
+                    width: deckPane.width
+
+                    onResetRequested: toolbar.setDeckRowSize(1, 1)
+                    onStateRequested: deckState => toolbar.setDeckRowSize(1, deckState)
+                }
+                DeckRowHandle {
+                    id: deckRow2Handle
+
+                    boundaryY: deckPane.deckStackHeight
+                    currentState: root.normalSecondRowDeckState
+                    enabled: visible
+                    reference: deckPane
+                    rowTop: deckPane.deckRowHeight + LateNightTheme.deckRowGutter
+                    visible: root.deckRowResizeEnabled && root.show4decks && deckPane.deckRowExpansion > 0.99
+                    width: deckPane.width
+
+                    onResetRequested: toolbar.setDeckRowSize(2, -1)
+                    onStateRequested: deckState => toolbar.setDeckRowSize(2, deckState)
                 }
 
                 // Skin.SamplerRow {
