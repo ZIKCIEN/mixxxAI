@@ -1,0 +1,462 @@
+diff --git a/res/skins/LateNightQML/Controls/SectionPane.qml b/res/skins/LateNightQML/Controls/SectionPane.qml
+new file mode 100644
+index 0000000..caf9023
+--- /dev/null
++++ b/res/skins/LateNightQML/Controls/SectionPane.qml
+@@ -0,0 +1,67 @@
++import "../LateNightTheme"
++import ".." as LateNight
++import QtQuick
++import QtQuick.Controls
++
++// A section of the main window embedded as a resizable pane of the main
++// vertical SplitView (no separate native window).
++//
++// The pane never gets smaller than its content (no hidden controls), and can
++// be enlarged with the splitter handle that follows it. The height chosen by
++// the user is remembered while the pane is hidden and shown again.
++Rectangle {
++    id: root
++
++    // Items declared inside the pane are placed in the clipped content area.
++    default property alias content: contentArea.data
++
++    property bool animationEnabled: LateNightTheme.layoutAnimationsEnabled
++    property int animationDuration: 180
++    // Natural height of the content: the minimum height of the pane.
++    property real contentHeight: 0
++    property bool shown: true
++    // Bound to SplitView.resizing of the parent SplitView.
++    property bool splitterResizing: false
++    // Height set by the user with the splitter handle (0: follow content).
++    property real userHeight: 0
++
++    readonly property bool animating: minimumHeightAnimation.running || preferredHeightAnimation.running
++    readonly property real paneMinimumHeight: minimumHeightAnimation.value
++    readonly property real panePreferredHeight: preferredHeightAnimation.value
++
++    SplitView.minimumHeight: paneMinimumHeight
++    clip: true
++    implicitHeight: panePreferredHeight
++    visible: panePreferredHeight > 0
++
++    Component.onCompleted: SplitView.preferredHeight = panePreferredHeight
++    onHeightChanged: {
++        if (shown && splitterResizing)
++            userHeight = Math.max(height, contentHeight);
++    }
++    onPanePreferredHeightChanged: {
++        if (!splitterResizing)
++            SplitView.preferredHeight = panePreferredHeight;
++    }
++
++    LateNight.LayoutAnimation {
++        id: minimumHeightAnimation
++
++        animationEnabled: root.animationEnabled && !root.splitterResizing
++        duration: root.animationDuration
++        targetValue: root.shown ? root.contentHeight : 0
++    }
++    LateNight.LayoutAnimation {
++        id: preferredHeightAnimation
++
++        animationEnabled: root.animationEnabled && !root.splitterResizing
++        duration: root.animationDuration
++        targetValue: root.shown ? Math.max(root.userHeight, root.contentHeight) : 0
++    }
++    Item {
++        id: contentArea
++
++        height: root.contentHeight
++        width: parent.width
++    }
++}
+diff --git a/res/skins/LateNightQML/MainWindow.qml b/res/skins/LateNightQML/MainWindow.qml
+index 88ec4d4..d326c96 100644
+--- a/res/skins/LateNightQML/MainWindow.qml
++++ b/res/skins/LateNightQML/MainWindow.qml
+@@ -1,4 +1,5 @@
+ import "../../qml" as Skin
++import "Controls" as LateNightControls
+ import "LateNightTheme"
+ import "Deck" as LateNightDeck
+ import "Effects" as LateNightEffects
+@@ -51,7 +52,9 @@ Item {
+             && !deck3OpacityAnimation.running
+             && !deck4AnchorAnimation.running
+             && !deck4OpacityAnimation.running
+-            && !libraryAnchorAnimation.running
++            && !effectsPane.animating
++            && !samplersPane.animating
++            && !micAuxPane.animating
+     readonly property bool restoringFromBigLibrary: bigLibraryTransition && !maximizeLibrary
+     readonly property int bigLibraryTransitionDuration: restoringFromBigLibrary ? 80 : 100
+     readonly property int deckModeTransitionDuration: 100
+@@ -255,21 +258,28 @@ Item {
+             handle: Rectangle {
+                 id: handleDelegate
+ 
++                // The deck/mixer pane has a fixed height: the handle that follows it
++                // cannot move anything, so it takes no space and is not drawn.
++                readonly property bool followsFixedPane: deckPane.visible
++                        && Math.abs(y - (deckPane.y + deckPane.height)) < 1
+                 readonly property bool pressed: splitView.resizing || T.SplitHandle.pressed
+ 
+                 clip: true
+                 color: LateNightTheme.libraryPanelSplitterBackground
+-                implicitHeight: 9
++                implicitHeight: followsFixedPane ? 0 : 9
+                 implicitWidth: 8
+ 
++                // Larger hit area than the drawn handle, for touch screens.
+                 containmentMask: Item {
+-                    height: 12
++                    height: handleDelegate.followsFixedPane ? 0 : 20
+                     width: splitView.width
+                     x: (handleDelegate.width - width) / 2
++                    y: (handleDelegate.height - height) / 2
+                 }
+ 
+                 Image {
+                     anchors.centerIn: parent
++                    visible: !handleDelegate.followsFixedPane
+                     fillMode: Image.PreserveAspectFit
+                     source: handleDelegate.pressed
+                             ? LateNightTheme.assetWaveformSplitterHandlePressed
+@@ -285,7 +295,7 @@ Item {
+                 readonly property real paneMinimumHeight: waveformsMinimumHeightAnimation.value
+                 readonly property real panePreferredHeight: waveformsPreferredHeightAnimation.value
+ 
+-                SplitView.fillHeight: !library.active
++                SplitView.fillHeight: false
+                 SplitView.minimumHeight: paneMinimumHeight
+                 implicitHeight: panePreferredHeight
+                 layoutTransitioning: root.bigLibraryTransition
+@@ -346,13 +356,18 @@ Item {
+                 property real deckSideMargin: root.showMixer && !root.layoutMaximizedLibrary ? LateNightTheme.deckMixerGutter : 2
+                 readonly property real deckStackHeight: basePaneHeight - LateNightTheme.deckRowGutter
+                 readonly property bool mixerLayoutVisible: root.showMixer && !root.layoutMaximizedLibrary
+-                readonly property real requiredPaneHeight: basePaneHeight + effectsSection.height + samplersSection.height + micAuxSection.height
++                // Height of the decks/mixer area. In "big library" mode the area ends at
++                // the bottom of the last deck, without the trailing row gutter.
++                readonly property real paneHeight: root.layoutMaximizedLibrary
++                        ? Math.max(0, basePaneHeight - LateNightTheme.deckRowGutter) : basePaneHeight
+                 property real visibleDeckHeight: root.layoutMaximizedLibrary ? (root.showMaximizedDecks ? LateNightTheme.miniDeckHeight : 0) : root.activeDeckHeight
+ 
+-                SplitView.fillHeight: library.active
+-                SplitView.maximumHeight: library.active ? undefined : requiredPaneHeight
+-                SplitView.minimumHeight: requiredPaneHeight
+-                implicitHeight: requiredPaneHeight
++                SplitView.fillHeight: false
++                SplitView.maximumHeight: paneHeight
++                SplitView.minimumHeight: paneHeight
++                SplitView.preferredHeight: paneHeight
++                implicitHeight: paneHeight
++                visible: paneHeight > 0
+                 width: splitView.width
+ 
+                 Behavior on visibleDeckHeight {
+@@ -799,172 +814,86 @@ Item {
+                         topMargin: LateNightTheme.deckRowGutter * Math.max(0, deckPane.deckRowExpansion)
+                     }
+                 }
++            }
++            LateNightControls.SectionPane {
++                id: effectsPane
++
++                animationDuration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration : 180
++                color: LateNightTheme.effectsRackGutterColor
++                contentHeight: effectsRack.implicitHeight
++                opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
++                shown: root.showEffects && !root.layoutMaximizedLibrary
++                splitterResizing: splitView.resizing
+ 
+-                // Skin.SamplerRow {
+-                //     id: samplers
+-                //     visible: root.showSamplers
+-                //     width: parent.width
+-
+-                //     Skin.FadeBehavior on visible {
+-                //         fadeTarget: samplers
+-                //     }
+-                // }
+-                Item {
+-                    id: effectsSection
+-
+-                    clip: true
+-                    height: root.showEffects && !root.layoutMaximizedLibrary ? effectsRack.implicitHeight : 0
+-                    opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
+-                    visible: height > 0
+-                    width: parent.width
+-                    y: deckPane.basePaneHeight
+-                    z: 2
+-
+-                    Behavior on height {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled && (!root.bigLibraryTransition || root.bigLibraryEffectsRestoreActive)
+-
+-                        SpringAnimation {
+-                            damping: 0.2
+-                            duration: root.bigLibraryEffectsRestoreActive ? 180 : 500
+-                            spring: 2
+-                        }
+-                    }
+-                    Behavior on opacity {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled
+-
+-                        NumberAnimation {
+-                            id: effectsSectionOpacityAnimation
+-
+-                            duration: 60
+-                        }
+-                    }
+-                    LateNightEffects.EffectsRack {
+-                        id: effectsRack
++                Behavior on opacity {
++                    enabled: LateNightTheme.layoutAnimationsEnabled
+ 
+-                        anchors.fill: parent
++                    NumberAnimation {
++                        duration: 60
+                     }
+                 }
+-                Item {
+-                    id: samplersSection
++                LateNightEffects.EffectsRack {
++                    id: effectsRack
+ 
+-                    clip: true
+-                    height: root.showSamplers && !root.layoutMaximizedLibrary ? samplers.implicitHeight : 0
+-                    opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
+-                    visible: height > 0
+-                    width: parent.width
+-                    y: effectsSection.y + effectsSection.height
+-                    z: 2
+-
+-                    Behavior on height {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition
+-
+-                        SpringAnimation {
+-                            damping: 0.2
+-                            duration: 500
+-                            spring: 2
+-                        }
+-                    }
+-                    Behavior on opacity {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled
+-
+-                        NumberAnimation {
+-                            id: samplersSectionOpacityAnimation
+-
+-                            duration: 60
+-                        }
+-                    }
+-                    LateNightSamplers.SamplersRack {
+-                        id: samplers
+-
+-                        anchors.fill: parent
+-                    }
++                    anchors.fill: parent
+                 }
+-                Item {
+-                    id: micAuxSection
++            }
++            LateNightControls.SectionPane {
++                id: samplersPane
+ 
+-                    clip: true
+-                    height: root.showMicAux && !root.layoutMaximizedLibrary ? micAuxRack.implicitHeight : 0
+-                    opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
+-                    visible: height > 0
+-                    width: parent.width
+-                    y: samplersSection.y + samplersSection.height
+-                    z: 2
+-
+-                    Behavior on height {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled && !root.bigLibraryTransition
+-
+-                        SpringAnimation {
+-                            damping: 0.2
+-                            duration: 500
+-                            spring: 2
+-                        }
+-                    }
+-                    Behavior on opacity {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled
++                animationDuration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration : 180
++                color: LateNightTheme.layoutGutterColor
++                contentHeight: samplers.implicitHeight
++                opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
++                shown: root.showSamplers && !root.layoutMaximizedLibrary
++                splitterResizing: splitView.resizing
+ 
+-                        NumberAnimation {
+-                            id: micAuxSectionOpacityAnimation
++                Behavior on opacity {
++                    enabled: LateNightTheme.layoutAnimationsEnabled
+ 
+-                            duration: 60
+-                        }
++                    NumberAnimation {
++                        duration: 60
+                     }
+-                    LateNightMicAux.MicAuxRack {
+-                        id: micAuxRack
++                }
++                LateNightSamplers.SamplersRack {
++                    id: samplers
+ 
+-                        anchors.fill: parent
+-                    }
++                    anchors.fill: parent
+                 }
+-                Loader {
+-                    id: library
++            }
++            LateNightControls.SectionPane {
++                id: micAuxPane
++
++                animationDuration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration : 180
++                color: LateNightTheme.micAuxRackGutterColor
++                contentHeight: micAuxRack.implicitHeight
++                opacity: root.bigLibraryTransition || root.deckModeTransition ? 0 : 1
++                shown: root.showMicAux && !root.layoutMaximizedLibrary
++                splitterResizing: splitView.resizing
+ 
+-                    active: true
+-                    width: parent.width
++                Behavior on opacity {
++                    enabled: LateNightTheme.layoutAnimationsEnabled
+ 
+-                    sourceComponent: Component {
+-                        Library {
+-                            anchors.fill: parent
+-                        }
++                    NumberAnimation {
++                        duration: 60
+                     }
+-                    states: [
+-                        State {
+-                            when: root.layoutMaximizedLibrary && !root.showMaximizedDecks
+-
+-                            AnchorChanges {
+-                                anchors.top: parent.top
+-                                target: library
+-                            }
+-                        },
+-                        State {
+-                            when: root.layoutMaximizedLibrary && root.showMaximizedDecks && root.show4decks
+-
+-                            AnchorChanges {
+-                                anchors.top: deck4.bottom
+-                                target: library
+-                            }
+-                        },
+-                        State {
+-                            when: root.layoutMaximizedLibrary && root.showMaximizedDecks && !root.show4decks
+-
+-                            AnchorChanges {
+-                                anchors.top: deck1.bottom
+-                                target: library
+-                            }
+-                        }
+-                    ]
+-                    transitions: Transition {
+-                        enabled: LateNightTheme.layoutAnimationsEnabled
++                }
++                LateNightMicAux.MicAuxRack {
++                    id: micAuxRack
+ 
+-                        AnchorAnimation {
+-                            id: libraryAnchorAnimation
++                    anchors.fill: parent
++                }
++            }
++            Loader {
++                id: library
+ 
+-                            duration: root.bigLibraryTransition ? root.bigLibraryTransitionDuration : 100
+-                            easing.type: Easing.OutCubic
+-                        }
+-                    }
++                SplitView.fillHeight: true
++                SplitView.minimumHeight: 0
++                active: true
+ 
+-                    anchors {
+-                        bottom: parent.bottom
+-                        top: micAuxSection.bottom
++                sourceComponent: Component {
++                    Library {
++                        anchors.fill: parent
+                     }
+                 }
+             }
+diff --git a/src/test/latenightlayoutstate_test.cpp b/src/test/latenightlayoutstate_test.cpp
+index 4a4469b..b512ed3 100644
+--- a/src/test/latenightlayoutstate_test.cpp
++++ b/src/test/latenightlayoutstate_test.cpp
+@@ -35,6 +35,23 @@ class LateNightLayoutStateTest : public MixxxTest {
+         return std::unique_ptr<QObject>(object);
+     }
+ 
++    std::unique_ptr<QObject> createSectionPane(bool shown, qreal contentHeight, qreal userHeight = 0) {
++        QQmlComponent component(
++                &m_engine,
++                QUrl::fromLocalFile(QStringLiteral(
++                        RESOURCE_FOLDER "/skins/LateNightQML/Controls/SectionPane.qml")));
++        QVariantMap initialProperties{
++                {QStringLiteral("animationEnabled"), false},
++                {QStringLiteral("contentHeight"), contentHeight},
++                {QStringLiteral("shown"), shown},
++                {QStringLiteral("userHeight"), userHeight},
++        };
++        QObject* object = component.createWithInitialProperties(initialProperties);
++        EXPECT_FALSE(component.isError()) << qPrintable(component.errorString());
++        EXPECT_NE(nullptr, object);
++        return std::unique_ptr<QObject>(object);
++    }
++
+     QQmlEngine m_engine;
+ };
+ 
+@@ -144,4 +161,40 @@ Item {
+     EXPECT_EQ(QStringLiteral("cue_set"), object->property("rightClickKey").toString());
+ }
+ 
++TEST_F(LateNightLayoutStateTest, SectionPaneNeverShrinksBelowItsContent) {
++    auto pane = createSectionPane(true, 80);
++    ASSERT_TRUE(pane);
++    EXPECT_DOUBLE_EQ(80, pane->property("paneMinimumHeight").toDouble());
++    EXPECT_DOUBLE_EQ(80, pane->property("panePreferredHeight").toDouble());
++    EXPECT_TRUE(pane->property("visible").toBool());
++
++    // A height smaller than the content is ignored.
++    pane->setProperty("userHeight", 50);
++    EXPECT_DOUBLE_EQ(80, pane->property("panePreferredHeight").toDouble());
++}
++
++TEST_F(LateNightLayoutStateTest, SectionPaneKeepsUserHeightAndCanBeHidden) {
++    auto pane = createSectionPane(true, 80, 150);
++    ASSERT_TRUE(pane);
++    EXPECT_DOUBLE_EQ(80, pane->property("paneMinimumHeight").toDouble());
++    EXPECT_DOUBLE_EQ(150, pane->property("panePreferredHeight").toDouble());
++
++    pane->setProperty("shown", false);
++    EXPECT_DOUBLE_EQ(0, pane->property("paneMinimumHeight").toDouble());
++    EXPECT_DOUBLE_EQ(0, pane->property("panePreferredHeight").toDouble());
++    EXPECT_FALSE(pane->property("visible").toBool());
++
++    // The height chosen by the user is restored when the pane is shown again.
++    pane->setProperty("shown", true);
++    EXPECT_DOUBLE_EQ(150, pane->property("panePreferredHeight").toDouble());
++}
++
++TEST_F(LateNightLayoutStateTest, SectionPaneFollowsContentHeight) {
++    auto pane = createSectionPane(true, 80);
++    ASSERT_TRUE(pane);
++    pane->setProperty("contentHeight", 120);
++    EXPECT_DOUBLE_EQ(120, pane->property("paneMinimumHeight").toDouble());
++    EXPECT_DOUBLE_EQ(120, pane->property("panePreferredHeight").toDouble());
++}
++
+ } // namespace
